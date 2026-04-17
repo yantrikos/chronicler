@@ -6,7 +6,13 @@ import {
   type InspectorMemory,
 } from "./components/Inspector/MemoryInspector";
 import { PromptInspector } from "./components/Inspector/PromptInspector";
+import {
+  ThinkPanel,
+  type ThinkConflict,
+  type ThinkTrigger,
+} from "./components/Inspector/ThinkPanel";
 import { SettingsPanel } from "./components/Settings/SettingsPanel";
+import { CharacterLibrary } from "./components/Library/CharacterLibrary";
 import { Logo, Mark } from "./components/Brand/Logo";
 import { EmptyState } from "./components/Brand/EmptyState";
 import { HelpOverlay } from "./components/Brand/HelpOverlay";
@@ -32,6 +38,10 @@ import {
   RegexExtractor,
   type Extractor,
 } from "./lib/orchestrator/extract";
+import {
+  ConflictVerifier,
+  type ConflictCheck,
+} from "./lib/orchestrator/verify-conflict";
 import { startSession } from "./lib/session/lifecycle";
 import { generateRecap } from "./lib/recap/generator";
 import {
@@ -96,6 +106,51 @@ function buildProvider(p: ProviderConfigEntry): LlmProvider {
   return new MockProvider();
 }
 
+// YantrikDB's trigger + conflict streams include housekeeping/low-signal
+// entries that we don't want cluttering the Think panel:
+//   - redundancy triggers are auto-merged by refreshThinkPanel above
+//   - minor conflicts with low priority are similarity heuristics, not
+//     semantic contradictions (e.g. "Ren is smirking" vs "Ren holds a fork"
+//     share an entity + some vocabulary but are obviously compatible)
+// We filter aggressively in the UI so what remains is actually actionable.
+function filterVisibleTriggers(
+  trigs: ThinkTrigger[]
+): ThinkTrigger[] {
+  return trigs.filter((t) => t.trigger_type !== "redundancy");
+}
+
+function filterVisibleConflicts(
+  confs: ThinkConflict[]
+): ThinkConflict[] {
+  return confs.filter((c) => {
+    // Trust YantrikDB's own priority classification: minor/low-priority
+    // pairs are noise under the similarity-based detector. Show only
+    // contradictions that the engine itself flags as non-trivial.
+    if (c.priority === "low" && c.conflict_type === "minor") return false;
+    return true;
+  });
+}
+
+function inferTier(
+  metaTier: string | undefined,
+  namespace: string,
+  importance: number
+): InspectorMemory["tier"] {
+  // If the server somehow returned our metadata intact, trust it.
+  if (metaTier === "canon" || metaTier === "heuristic" || metaTier === "reflex")
+    return metaTier;
+  // Otherwise infer from namespace conventions used by Chronicler writes.
+  if (namespace.startsWith("session:")) return "reflex";
+  if (namespace.startsWith("lorebook:")) return "canon";
+  if (namespace.startsWith("world:")) return "canon";
+  if (namespace.startsWith("character:")) {
+    // Seed canon writes ship with importance 0.7; heuristic inferences
+    // default to 0.4. Threshold at 0.65 splits them cleanly.
+    return importance >= 0.65 ? "canon" : "heuristic";
+  }
+  return "heuristic";
+}
+
 function buildExtractorFromConfig(cfg: ChroniclerConfig): {
   extractor: Extractor;
   provider_label: string;
@@ -138,18 +193,34 @@ function App() {
   const personaRef = useRef<
     import("./lib/config").UserPersona | undefined
   >(undefined);
+  const conflictVerifierRef = useRef<ConflictVerifier | null>(null);
   const [streamingText, setStreamingText] = useState<string | undefined>(undefined);
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [authorNote, setAuthorNote] = useState<string>("");
   const [authorNoteOpen, setAuthorNoteOpen] = useState(false);
   const [greetingIndex, setGreetingIndex] = useState<number>(0);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Cache of full memory records (populated via memory.get). Avoids re-fetching
+  // the same rid on every refresh.
+  const metaCacheRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+  const [triggers, setTriggers] = useState<ThinkTrigger[]>([]);
+  const [conflicts, setConflicts] = useState<ThinkConflict[]>([]);
+  const [runningThink, setRunningThink] = useState(false);
+  const lastUserTurnAtRef = useRef<number>(Date.now());
+  const [view, setView] = useState<"library" | "chat">("chat");
+  const [libraryCharacters, setLibraryCharacters] = useState<Character[]>([]);
 
   useEffect(() => {
     const cfg = loadConfig();
     setConfig(cfg);
     rebuildRuntime(cfg);
-    setSessions(listSessions());
+    const sess = listSessions();
+    setSessions(sess);
+    const chars = listCharacters();
+    setLibraryCharacters(chars);
+    // Land on the library view when there are prior characters and no
+    // in-progress chat; jump to chat if nothing imported yet.
+    if (chars.length > 0) setView("library");
   }, []);
 
   // Persist turns on every change (cheap — localStorage sync, no race).
@@ -166,6 +237,17 @@ function App() {
     }
   }, [turns, sessionId, scene, characters, greetingIndex, authorNote]);
 
+  // Refresh the inspector whenever the character roster or session changes.
+  // Calling refreshMemories() from inside the import handler would read the
+  // stale `characters` closure — useEffect waits until React has flushed
+  // the state, so we query the right namespaces.
+  useEffect(() => {
+    if (characters.length === 0) return;
+    void refreshMemories();
+    void refreshThinkPanel(`character:${characters[0].id}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characters.map((c) => c.id).join(","), sessionId]);
+
   function rebuildRuntime(cfg: ChroniclerConfig) {
     const prev = transportRef.current;
     if (prev instanceof McpTransport) prev.close().catch(() => undefined);
@@ -176,6 +258,20 @@ function App() {
     providerRef.current = provider;
     modelRef.current = p?.model ?? "mock";
     extractorRef.current = buildExtractorFromConfig(cfg).extractor;
+
+    // Build a conflict verifier using the extraction provider (small/fast)
+    // when configured, falling back to the generation provider. Skip for
+    // MockProvider — nothing to verify with against.
+    const xp = extractionProvider(cfg);
+    if (xp && xp.kind !== "mock") {
+      const vp = buildProvider(xp);
+      conflictVerifierRef.current = new ConflictVerifier(vp, xp.model);
+    } else if (p && p.kind !== "mock") {
+      conflictVerifierRef.current = new ConflictVerifier(provider, p.model);
+    } else {
+      conflictVerifierRef.current = null;
+    }
+
     samplingRef.current = p
       ? {
           temperature: p.temperature,
@@ -203,7 +299,249 @@ function App() {
     [turns, config]
   );
 
-  function refreshMemories() {
+  async function refreshThinkPanel(ns: string) {
+    const client = clientRef.current;
+    try {
+      const [trigs, confs] = await Promise.all([
+        client.triggerPending(ns),
+        client.conflictList(ns),
+      ]);
+
+      // Two classes of maintenance triggers we handle automatically —
+      // YantrikDB is nagging us about bookkeeping we can dispatch without
+      // any user judgment:
+      //   - redundancy: "two memories are ~100% similar" → consolidate
+      //   - conflict_escalation: "you have N open conflicts, review them"
+      //       → run the LLM verifier over ALL conflicts and dismiss the
+      //         pairs that are actually compatible, then ack the trigger
+      const redundant = trigs.filter((t) => t.trigger_type === "redundancy");
+      const escalations = trigs.filter(
+        (t) => t.trigger_type === "conflict_escalation"
+      );
+
+      // Also proactively bulk-dismiss the minor+low noise even if there's
+      // no escalation trigger yet — YantrikDB's similarity detector produces
+      // enough of these per turn that waiting for escalation is slow.
+      const trivialCount = confs.filter(
+        (c) => c.priority === "low" && c.conflict_type === "minor"
+      ).length;
+
+      if (
+        redundant.length > 0 ||
+        escalations.length > 0 ||
+        trivialCount >= 5
+      ) {
+        void (async () => {
+          await Promise.all(
+            redundant.map((t) =>
+              client.triggerAct(t.id).catch(() => undefined)
+            )
+          );
+          await dismissFalsePositiveConflicts(confs);
+          if (escalations.length > 0) {
+            await Promise.all(
+              escalations.map((t) =>
+                client.triggerAct(t.id).catch(() => undefined)
+              )
+            );
+          }
+          await client.think(ns).catch(() => undefined);
+          const [freshTrigs, freshConfs] = await Promise.all([
+            client.triggerPending(ns),
+            client.conflictList(ns),
+          ]);
+          setTriggers(filterVisibleTriggers(freshTrigs));
+          await updateConflictsWithVerification(freshConfs);
+        })();
+      }
+
+      setTriggers(filterVisibleTriggers(trigs));
+      await updateConflictsWithVerification(confs);
+    } catch {
+      // non-fatal
+    }
+  }
+
+  /** Dispatch YantrikDB's conflict backlog:
+   *    1. Bulk-dismiss anything YantrikDB itself classifies as minor+low.
+   *       Its own heuristic already says "low confidence" — trust it and
+   *       don't waste LLM tokens.
+   *    2. LLM-verify only the medium/high priority candidates (capped per
+   *       refresh to bound latency).
+   *    3. Dismiss the LLM-verified compatibles on the YantrikDB side so
+   *       the count actually drops.
+   *
+   *  This keeps conflict detection useful without paying LLM tokens on
+   *  thousands of similarity false-positives. Verifier cache dedupes
+   *  across refreshes. */
+  async function dismissFalsePositiveConflicts(
+    candidates: ThinkConflict[]
+  ): Promise<void> {
+    const client = clientRef.current;
+    const trivialNoise = candidates.filter(
+      (c) => c.priority === "low" && c.conflict_type === "minor"
+    );
+    if (trivialNoise.length > 0) {
+      // Fire in parallel — each resolve is ~20ms on YantrikDB.
+      await Promise.all(
+        trivialNoise.map((c) =>
+          client.conflictResolve(c.id, "dismiss").catch(() => undefined)
+        )
+      );
+    }
+
+    const verifier = conflictVerifierRef.current;
+    if (!verifier) return;
+    const MAX_VERIFY_PER_REFRESH = 12;
+    const nontrivial = candidates
+      .filter(
+        (c) =>
+          !(c.priority === "low" && c.conflict_type === "minor") &&
+          c.a?.text &&
+          c.b?.text
+      )
+      .slice(0, MAX_VERIFY_PER_REFRESH);
+    if (nontrivial.length === 0) return;
+    const checks = await verifier
+      .verifyBatch(
+        nontrivial.map((c) => ({ id: c.id, a: c.a, b: c.b }))
+      )
+      .catch(() => [] as ConflictCheck[]);
+    const dismissals = checks.filter(
+      (v) => v.verdict === "compatible" && v.confidence !== "low"
+    );
+    if (dismissals.length === 0) return;
+    await Promise.all(
+      dismissals.map((v) =>
+        client.conflictResolve(v.conflict_id, "dismiss").catch(() => undefined)
+      )
+    );
+  }
+
+  // Candidate list comes from YantrikDB's cheap similarity-based detector.
+  // Before showing, we run an LLM pass over candidates (cached per
+  // conflict_id, bounded parallelism) to separate real contradictions from
+  // coincidental word overlap. This is the "YantrikDB narrows, LLM
+  // verifies" pattern.
+  async function updateConflictsWithVerification(
+    raw: ThinkConflict[]
+  ): Promise<void> {
+    // First cut: hide what YantrikDB itself rates as minor+low (noise).
+    const passing = filterVisibleConflicts(raw);
+    const verifier = conflictVerifierRef.current;
+    // With no verifier available (mock provider), trust YantrikDB's own
+    // priority and show everything that passed.
+    if (!verifier) {
+      setConflicts(passing);
+      return;
+    }
+
+    // Paint what we have immediately so the UI isn't blank while the LLM
+    // verifies in the background.
+    setConflicts(passing);
+
+    const checks: ConflictCheck[] = await verifier
+      .verifyBatch(
+        passing.map((c) => ({ id: c.id, a: c.a, b: c.b }))
+      )
+      .catch(() => [] as ConflictCheck[]);
+
+    const verdictById = new Map(checks.map((v) => [v.conflict_id, v]));
+    const verified: ThinkConflict[] = passing
+      .map((c) => {
+        const v = verdictById.get(c.id);
+        if (!v) return c;
+        // Replace detection_reason with the verifier's explanation so the
+        // UI reflects the LLM judgment rather than the raw similarity score.
+        return {
+          ...c,
+          detection_reason: `${v.verdict}/${v.confidence} — ${v.explanation}`,
+          conflict_type: v.verdict === "contradiction" ? "contradiction" : c.conflict_type,
+          priority:
+            v.verdict === "contradiction" && v.confidence === "high"
+              ? "high"
+              : v.verdict === "contradiction"
+              ? "medium"
+              : c.priority,
+        };
+      })
+      // Keep only pairs the LLM believes are real contradictions (or high-
+      // priority YantrikDB flags the verifier couldn't decisively dismiss).
+      .filter((c) => {
+        const v = verdictById.get(c.id);
+        if (!v) return c.priority === "high";
+        return v.verdict === "contradiction" && v.confidence !== "low";
+      });
+    setConflicts(verified);
+  }
+
+  async function onRunThink() {
+    if (characters.length === 0 || runningThink) return;
+    setRunningThink(true);
+    try {
+      const primary = characters[0];
+      const ns = `character:${primary.id}`;
+      await clientRef.current.think(ns).catch(() => undefined);
+      await refreshThinkPanel(ns);
+      await refreshMemories();
+    } finally {
+      setRunningThink(false);
+    }
+  }
+
+  async function onActTrigger(id: string) {
+    const target = triggers.find((t) => t.id === id);
+    if (!target || characters.length === 0) return;
+    // Housekeeping triggers are auto-acted in refreshThinkPanel — if one
+    // slipped into the visible list, still apply it silently.
+    if (target.trigger_type === "redundancy") {
+      await clientRef.current.triggerAct(id).catch(() => undefined);
+      const ns = `character:${characters[0].id}`;
+      await clientRef.current.think(ns).catch(() => undefined);
+      await refreshThinkPanel(ns);
+      await refreshMemories();
+      return;
+    }
+    // Real character urge — have them speak it.
+    await proactivelySpeak(target);
+    await clientRef.current.triggerAct(id).catch(() => undefined);
+    setTriggers((ts) => ts.filter((t) => t.id !== id));
+  }
+
+  async function onDismissTrigger(id: string) {
+    await clientRef.current.triggerDismiss(id).catch(() => undefined);
+    setTriggers((ts) => ts.filter((t) => t.id !== id));
+  }
+
+  async function onResolveConflict(
+    id: string,
+    strategy: "keep_a" | "keep_b" | "merge" | "dismiss"
+  ) {
+    await clientRef.current.conflictResolve(id, strategy).catch(() => undefined);
+    setConflicts((cs) => cs.filter((c) => c.id !== id));
+    await refreshMemories();
+  }
+
+  async function proactivelySpeak(trigger: ThinkTrigger) {
+    if (characters.length === 0 || !sessionId || !scene) return;
+    const speakerChar = characters.find(
+      (c) => c.id === (nextSpeakerId ?? characters[0].id)
+    );
+    if (!speakerChar) return;
+    const hint = trigger.reason || "(follow an inner urge)";
+    const priorNote = authorNote;
+    setAuthorNote(
+      (priorNote ? `${priorNote}\n\n` : "") +
+        `You have an urge right now: ${hint}. Act on it naturally this turn without announcing it or breaking character.`
+    );
+    try {
+      await runAssistantTurn(turns, undefined, speakerChar, { skipWrites: false });
+    } finally {
+      setAuthorNote(priorNote);
+    }
+  }
+
+  async function refreshMemories() {
     if (transportRef.current instanceof InMemoryTransport) {
       const all = transportRef.current.all();
       const view: InspectorMemory[] = all.map((m) => ({
@@ -221,11 +559,156 @@ function App() {
       setMemories(view);
       return;
     }
-    setMemories([]);
+
+    // MCP transport: pull memories for the active scene's namespaces in
+    // parallel. Dedupe by rid so we don't double-count shared canon.
+    if (characters.length === 0) {
+      setMemories([]);
+      return;
+    }
+    const primary = characters[0];
+    const client = clientRef.current;
+    try {
+      const requests: Promise<Awaited<ReturnType<typeof client.listMemoriesInNamespace>>>[] =
+        [];
+      for (const c of characters) {
+        requests.push(client.listMemoriesInNamespace(`character:${c.id}`, 200));
+        requests.push(
+          client.listMemoriesInNamespace(`lorebook:${c.id}`, 100)
+        );
+      }
+      if (primary.world_id) {
+        requests.push(
+          client.listMemoriesInNamespace(`world:${primary.world_id}`, 100)
+        );
+      }
+      if (sessionId) {
+        requests.push(
+          client.listMemoriesInNamespace(`session:${sessionId}`, 60)
+        );
+      }
+      const batches = await Promise.all(requests);
+      const seen = new Set<string>();
+      const view: InspectorMemory[] = [];
+      for (const batch of batches) {
+        for (const r of batch) {
+          const rid = (r as { rid?: string }).rid;
+          if (!rid || seen.has(rid)) continue;
+          seen.add(rid);
+          // Start with cached full metadata if we've fetched it before.
+          const cached = metaCacheRef.current.get(rid) ?? null;
+          const meta =
+            cached ??
+            ((r as { metadata?: Record<string, unknown> }).metadata ?? {});
+          const ns = (r as { namespace?: string }).namespace ?? "";
+          const importance = (r as { importance?: number }).importance ?? 0.5;
+          const tier = inferTier(meta.tier as string | undefined, ns, importance);
+          view.push({
+            rid,
+            text: (r as { text?: string }).text ?? "",
+            tier,
+            canonical_status:
+              meta.canonical_status as InspectorMemory["canonical_status"],
+            certainty: (r as { certainty?: number }).certainty ?? 0.5,
+            importance,
+            source: String(
+              (r as { source?: string }).source ?? meta.source ?? "user"
+            ),
+            namespace: ns,
+          });
+        }
+      }
+      const tierOrder: Record<string, number> = {
+        canon: 0,
+        heuristic: 1,
+        reflex: 2,
+      };
+      const byTierThenImportance = (a: InspectorMemory, b: InspectorMemory) => {
+        const t = (tierOrder[a.tier] ?? 9) - (tierOrder[b.tier] ?? 9);
+        if (t !== 0) return t;
+        return (b.importance ?? 0) - (a.importance ?? 0);
+      };
+      view.sort(byTierThenImportance);
+      setMemories(view);
+
+      // Second pass: for rids we don't have cached full metadata for, fire
+      // memory.get in parallel and update the inspector once the ground
+      // truth arrives. This is the "recall returns highlights; get returns
+      // the exact record" contract on the read side.
+      const missing = view
+        .filter((m) => !metaCacheRef.current.has(m.rid))
+        .slice(0, 80); // cap per refresh to bound request volume
+      if (missing.length > 0) {
+        void enrichMemories(missing).then((enrichedAll) => {
+          // Merge enriched tier/canonical_status back into the view, update
+          // the cache, and re-render.
+          setMemories((prev) => {
+            const byRid = new Map(enrichedAll.map((e) => [e.rid, e]));
+            const merged = prev.map((m) => {
+              const full = byRid.get(m.rid);
+              if (!full) return m;
+              metaCacheRef.current.set(m.rid, full.metadata);
+              const realTier =
+                (full.metadata.tier as InspectorMemory["tier"] | undefined) ??
+                m.tier;
+              return {
+                ...m,
+                tier: realTier,
+                canonical_status:
+                  (full.metadata
+                    .canonical_status as InspectorMemory["canonical_status"]) ??
+                  m.canonical_status,
+                certainty: full.certainty ?? m.certainty,
+                source: full.source ?? m.source,
+              };
+            });
+            merged.sort(byTierThenImportance);
+            return merged;
+          });
+        });
+      }
+    } catch (err) {
+      console.error("[chronicler] refreshMemories failed", err);
+    }
+  }
+
+  async function enrichMemories(
+    items: InspectorMemory[]
+  ): Promise<
+    Array<{
+      rid: string;
+      metadata: Record<string, unknown>;
+      certainty?: number;
+      source?: string;
+    }>
+  > {
+    const client = clientRef.current;
+    const records = await Promise.all(
+      items.map((m) =>
+        client.getMemory(m.rid).catch(() => null)
+      )
+    );
+    const out: Array<{
+      rid: string;
+      metadata: Record<string, unknown>;
+      certainty?: number;
+      source?: string;
+    }> = [];
+    for (const r of records) {
+      if (!r) continue;
+      out.push({
+        rid: r.rid,
+        metadata: r.metadata,
+        certainty: r.certainty,
+        source: r.source,
+      });
+    }
+    return out;
   }
 
   async function addCharacter(char: Character, systemPrompt: string) {
     storeSaveCharacter({ ...char, system_prompt: systemPrompt });
+    setLibraryCharacters(listCharacters());
     setCharacters((prev) => {
       if (prev.some((c) => c.id === char.id)) return prev;
       const next = [...prev, char];
@@ -270,6 +753,37 @@ function App() {
       return next;
     });
     setSystemPrompts((prev) => ({ ...prev, [char.id]: systemPrompt }));
+  }
+
+  async function startNewSessionForCharacter(primary: Character): Promise<void> {
+    const s = soloScene(primary.id);
+    setScene(s);
+    setNextSpeakerId(primary.id);
+    setAuthorNote("");
+    setGreetingIndex(0);
+    const ss = await startSession(clientRef.current, {
+      user_id: "user",
+      character_ids: [primary.id],
+      world_id: primary.world_id,
+    });
+    setSessionId(ss.id);
+    const greetings = primary.greetings ?? [];
+    setTurns(
+      greetings.length > 0
+        ? [
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              speaker: primary.id,
+              content: greetings[0],
+              created_at: new Date().toISOString(),
+              session_id: ss.id,
+            },
+          ]
+        : []
+    );
+    await refreshMemories();
+    await refreshThinkPanel(`character:${primary.id}`);
   }
 
   async function startNewSession(): Promise<void> {
@@ -538,7 +1052,16 @@ function App() {
         const next = characters[(idx + 1) % characters.length];
         setNextSpeakerId(next.id);
       }
-      writes_promise.then(() => refreshMemories()).catch(() => undefined);
+      writes_promise.then(async () => {
+        await refreshMemories();
+        // After every Nth turn, run think() so conflicts + urges stay fresh
+        // without waiting for session end.
+        if ((turns.length + 1) % 4 === 0 && characters.length > 0) {
+          const ns = `character:${characters[0].id}`;
+          await clientRef.current.think(ns).catch(() => undefined);
+          await refreshThinkPanel(ns);
+        }
+      }).catch(() => undefined);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[chronicler] turn failed:", err);
@@ -549,8 +1072,53 @@ function App() {
     }
   }
 
+  // Proactive-speak loop: checks every 15s whether the character should
+  // take initiative. Off by default; user enables in Settings.
+  useEffect(() => {
+    if (!config.proactive_mode || config.proactive_mode === "off") return;
+    if (characters.length === 0) return;
+    const idleMs = (config.proactive_idle_seconds ?? 180) * 1000;
+    const check = async () => {
+      const idleFor = Date.now() - lastUserTurnAtRef.current;
+      if (thinking) return;
+      const gate =
+        config.proactive_mode === "passive" ? idleFor >= idleMs : true;
+      if (!gate) return;
+      const primary = characters[0];
+      const trigs = await clientRef.current.triggerPending(
+        `character:${primary.id}`
+      );
+      setTriggers(trigs);
+      // Skip redundancy/maintenance triggers — they're memory housekeeping,
+      // not character urges. Only let truly urge-ish types drive proactive
+      // speaking.
+      const urgeKinds = new Set([
+        "curiosity",
+        "unresolved",
+        "emotional",
+        "contradiction",
+        "unresolved_thread",
+      ]);
+      const urgeTrigs = trigs.filter((t) => urgeKinds.has(t.trigger_type));
+      if (urgeTrigs.length === 0) return;
+      const pick = urgeTrigs
+        .slice()
+        .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))[0];
+      if (!pick) return;
+      if (config.proactive_mode === "passive" && (pick.urgency ?? 0) < 0.5)
+        return;
+      await proactivelySpeak(pick);
+      await clientRef.current.triggerAct(pick.id).catch(() => undefined);
+      lastUserTurnAtRef.current = Date.now();
+    };
+    const interval = setInterval(() => void check(), 15000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.proactive_mode, config.proactive_idle_seconds, characters, thinking]);
+
   async function onSend(text: string) {
     setErrorMsg(null);
+    lastUserTurnAtRef.current = Date.now();
     if (characters.length === 0) {
       setErrorMsg("No character loaded yet. Click 'demo: Ren' or '+ card' first.");
       return;
@@ -586,6 +1154,53 @@ function App() {
 
   function onDeleteMessage(turnId: string) {
     setTurns((ts) => ts.filter((t) => t.id !== turnId));
+  }
+
+  async function onForkSession(atTurnId: string) {
+    if (!sessionId || !scene || characters.length === 0) return;
+    const idx = turns.findIndex((t) => t.id === atTurnId);
+    if (idx < 0) return;
+    const forkTurns = turns.slice(0, idx + 1).map((t) => ({
+      ...t,
+      id: crypto.randomUUID(), // fresh ids so editing in branch doesn't hit original
+    }));
+    const forkSessionId = `session-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const now = new Date().toISOString();
+    const meta = {
+      ...(sessions.find((s) => s.id === sessionId) ?? {
+        title: "session",
+        character_ids: characters.map((c) => c.id),
+        world_id: characters[0].world_id,
+        created_at: now,
+        preview: "",
+        turn_count: forkTurns.length,
+        scene_kind: scene.kind,
+        scene_participants: scene.participants,
+        scene_id: scene.id,
+        scene_created_at: scene.created_at,
+      }),
+      id: forkSessionId,
+      title: `${
+        sessions.find((s) => s.id === sessionId)?.title ?? "session"
+      } ↱ fork`,
+      last_at: now,
+      turn_count: forkTurns.length,
+      preview:
+        forkTurns[forkTurns.length - 1]?.content
+          .replace(/\s+/g, " ")
+          .slice(0, 80) ?? "",
+      parent_session_id: sessionId,
+      forked_at_turn_id: atTurnId,
+      greeting_index: greetingIndex,
+      author_note: authorNote,
+    } as SessionMeta;
+    saveSessionMeta(meta);
+    saveTurns(forkSessionId, forkTurns);
+    setSessions(listSessions());
+    setSessionId(forkSessionId);
+    setTurns(forkTurns);
   }
 
   async function onRegenerate(turnId: string) {
@@ -808,22 +1423,103 @@ function App() {
       ? characters[0].description ?? ""
       : `Group scene · ${characters.length} characters`;
 
+  if (view === "library") {
+    return (
+      <div className="h-screen text-sm">
+        <CharacterLibrary
+          characters={libraryCharacters}
+          sessions={sessions}
+          onPickCharacter={(id) => {
+            // resume latest session with this character, or start new
+            const latest = sessions
+              .filter((s) => s.character_ids.includes(id))
+              .sort((a, b) => b.last_at.localeCompare(a.last_at))[0];
+            if (latest) {
+              setView("chat");
+              void switchSession(latest.id);
+            } else {
+              // hydrate into chat + start a new session
+              const ch = libraryCharacters.find((c) => c.id === id);
+              if (ch) {
+                setCharacters([ch]);
+                setSystemPrompts((p) => ({
+                  ...p,
+                  [ch.id]: ch.system_prompt ?? "",
+                }));
+                setView("chat");
+                void startNewSessionForCharacter(ch);
+              }
+            }
+          }}
+          onNewSessionFor={(id) => {
+            const ch = libraryCharacters.find((c) => c.id === id);
+            if (!ch) return;
+            setCharacters([ch]);
+            setSystemPrompts((p) => ({
+              ...p,
+              [ch.id]: ch.system_prompt ?? "",
+            }));
+            setView("chat");
+            void startNewSessionForCharacter(ch);
+          }}
+          onImportFile={(f) => {
+            setView("chat");
+            void onImportCard(f);
+          }}
+          onDemo={() => {
+            setView("chat");
+            void loadDemoCharacter("ren");
+          }}
+          onDeleteCharacter={(id) => {
+            import("./lib/session/store").then(({ deleteCharacter }) => {
+              deleteCharacter(id);
+              setLibraryCharacters(listCharacters());
+            });
+          }}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        {settingsOpen && (
+          <SettingsPanel
+            config={config}
+            onClose={() => setSettingsOpen(false)}
+            onSave={(cfg) => {
+              saveConfig(cfg);
+              setConfig(cfg);
+              rebuildRuntime(cfg);
+            }}
+            onExportBackup={onExportBackup}
+            onImportBackup={onImportBackup}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="grid h-screen grid-cols-[1fr_340px] text-sm">
       <div className="flex flex-col">
         <header className="px-6 py-3 border-b border-neutral-800 bg-neutral-950 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {characters.length === 0 ? (
-              <Logo size={28} />
-            ) : (
-              <Mark size={24} />
-            )}
+            <button
+              onClick={() => setView("library")}
+              title="back to library"
+              className="hover:opacity-70 transition-opacity"
+            >
+              {characters.length === 0 ? (
+                <Logo size={28} />
+              ) : (
+                <Mark size={24} />
+              )}
+            </button>
             {characters.length > 0 && (
-              <div>
-                <h1 className="text-base font-semibold text-neutral-100 leading-tight">
+              <div className="min-w-0 max-w-[40ch]">
+                <h1 className="text-base font-semibold text-neutral-100 leading-tight truncate">
                   {headerTitle}
                 </h1>
-                <p className="text-[11px] text-neutral-500 mt-0.5">
+                <p
+                  className="text-[11px] text-neutral-500 mt-0.5 truncate"
+                  title={headerSubtitle}
+                >
                   {headerSubtitle}
                 </p>
               </div>
@@ -1026,6 +1722,7 @@ function App() {
               onContinue={onContinue}
               onImpersonate={onImpersonate}
               onSwipeChange={onSwipeChange}
+              onFork={onForkSession}
             />
           )}
         </div>
@@ -1035,7 +1732,7 @@ function App() {
           sessions={sessions}
           activeId={sessionId ?? undefined}
           characterAvatars={Object.fromEntries(
-            listCharacters()
+            libraryCharacters
               .filter((c) => c.avatar_url)
               .map((c) => [c.id, c.avatar_url as string])
           )}
@@ -1044,6 +1741,16 @@ function App() {
           onDelete={onDeleteSession}
           onRename={onRenameSession}
           onExport={onExportSession}
+        />
+        <ThinkPanel
+          characterName={characters[0]?.name}
+          triggers={triggers}
+          conflicts={conflicts}
+          onActTrigger={onActTrigger}
+          onDismissTrigger={onDismissTrigger}
+          onResolveConflict={onResolveConflict}
+          onRunThink={onRunThink}
+          isThinking={runningThink}
         />
         <div className="flex-1 min-h-0">
           <MemoryInspector

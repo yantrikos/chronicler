@@ -42,6 +42,13 @@ export interface ChroniclerConfig {
     min_unique_sessions: number;
     max_days_span: number;
   };
+  /** Proactive messaging: the character takes initiative when accumulated
+   *  urges cross a threshold. off = never. passive = only when user has
+   *  been idle N seconds AND a trigger exists. aggressive = any time a
+   *  trigger arrives at high pressure. */
+  proactive_mode?: "off" | "passive" | "aggressive";
+  /** Idle threshold in seconds for passive mode. */
+  proactive_idle_seconds?: number;
 }
 
 const STORAGE_KEY = "chronicler.config.v1";

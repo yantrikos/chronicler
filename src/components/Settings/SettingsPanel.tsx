@@ -134,6 +134,43 @@ export function SettingsPanel({
           </div>
 
           <div>
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Proactive messages</h3>
+            <div className="border border-neutral-800 rounded-md p-3 bg-neutral-950 space-y-2">
+              <LabeledSelect
+                label="character takes initiative"
+                value={draft.proactive_mode ?? "off"}
+                options={[
+                  { value: "off", label: "off — only reply to user" },
+                  { value: "passive", label: "passive — after idle + strong urge" },
+                  { value: "aggressive", label: "aggressive — any pending urge" },
+                ]}
+                onChange={(v) =>
+                  setDraft({
+                    ...draft,
+                    proactive_mode: v as "off" | "passive" | "aggressive",
+                  })
+                }
+              />
+              {draft.proactive_mode === "passive" && (
+                <LabeledInput
+                  label="idle threshold (seconds)"
+                  type="number"
+                  value={String(draft.proactive_idle_seconds ?? 180)}
+                  onChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      proactive_idle_seconds: Number(v) || 180,
+                    })
+                  }
+                />
+              )}
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                The character acts on accumulated urges (YantrikDB triggers). Off by default — try passive first.
+              </p>
+            </div>
+          </div>
+
+          <div>
             <h3 className="text-sm font-semibold text-neutral-200 mb-2">Memory backend</h3>
             <div className="grid grid-cols-2 gap-2">
               <RadioCard

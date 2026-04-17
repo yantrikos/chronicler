@@ -17,6 +17,7 @@ interface Props {
   onContinue?: (turnId: string) => void | Promise<void>;
   onImpersonate?: (currentDraft: string) => Promise<string | null>;
   onSwipeChange?: (turnId: string, newIndex: number) => void;
+  onFork?: (turnId: string) => void | Promise<void>;
 }
 
 export function ChatPane({
@@ -34,6 +35,7 @@ export function ChatPane({
   onContinue,
   onImpersonate,
   onSwipeChange,
+  onFork,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [impersonating, setImpersonating] = useState(false);
@@ -92,6 +94,7 @@ export function ChatPane({
             onRegenerate={onRegenerate}
             onContinue={onContinue}
             onSwipeChange={onSwipeChange}
+            onFork={onFork}
           />
         ))}
         {streamingText !== undefined && streamingText.length > 0 && (
@@ -165,6 +168,7 @@ interface BubbleProps {
   onRegenerate?: (turnId: string) => void | Promise<void>;
   onContinue?: (turnId: string) => void | Promise<void>;
   onSwipeChange?: (turnId: string, newIndex: number) => void;
+  onFork?: (turnId: string) => void | Promise<void>;
 }
 
 function MessageBubble({
@@ -177,6 +181,7 @@ function MessageBubble({
   onRegenerate,
   onContinue,
   onSwipeChange,
+  onFork,
 }: BubbleProps) {
   const isUser = turn.role === "user";
   const [editing, setEditing] = useState(false);
@@ -339,6 +344,14 @@ function MessageBubble({
             {onContinue && !isUser && isLastAssistant && (
               <IconBtn title="continue" onClick={() => onContinue(turn.id)}>
                 ⇢
+              </IconBtn>
+            )}
+            {onFork && (
+              <IconBtn
+                title="fork — branch a new session from this turn"
+                onClick={() => onFork(turn.id)}
+              >
+                ⑂
               </IconBtn>
             )}
             {onDelete && (

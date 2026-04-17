@@ -38,13 +38,29 @@ export async function decomposeCard(
     raw_card: rawJson,
   };
 
-  // Seed canon memories from card fields
+  // Dedup on re-import: if this character already has seed canon for any of
+  // these fields, don't write them again. Uses a broad recall to the
+  // character namespace and matches on exact-prefix content.
+  const existing = await client
+    .listMemoriesInNamespace(`character:${character_id}`, 300)
+    .catch(() => [] as Array<{ text?: string }>);
+  const existingTexts = new Set(
+    existing.map((m) => (m as { text?: string }).text ?? "").filter(Boolean)
+  );
+  const addIfNew = (bucket: string[], text: string) => {
+    if (text && !existingTexts.has(text)) bucket.push(text);
+  };
+
   const seeds: string[] = [];
-  if (data.description) seeds.push(`Description of ${data.name}: ${data.description}`);
-  if (data.personality) seeds.push(`Personality of ${data.name}: ${data.personality}`);
-  if (data.scenario) seeds.push(`Scenario: ${data.scenario}`);
-  if (data.first_mes) seeds.push(`First message template: ${data.first_mes}`);
-  if (data.mes_example) seeds.push(`Example dialogues: ${data.mes_example}`);
+  if (data.description)
+    addIfNew(seeds, `Description of ${data.name}: ${data.description}`);
+  if (data.personality)
+    addIfNew(seeds, `Personality of ${data.name}: ${data.personality}`);
+  if (data.scenario) addIfNew(seeds, `Scenario: ${data.scenario}`);
+  if (data.first_mes)
+    addIfNew(seeds, `First message template: ${data.first_mes}`);
+  if (data.mes_example)
+    addIfNew(seeds, `Example dialogues: ${data.mes_example}`);
 
   const seedInputs = seeds.map((text) =>
     rememberAsCanon(text, opts.session_id, metaBase)

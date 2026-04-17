@@ -36,8 +36,6 @@ export async function endSession(
 ): Promise<EndSessionResult> {
   await client.sessionEnd(session.id).catch(() => undefined);
 
-  // Write a session summary as canon. If caller didn't supply one, compose
-  // a minimal one from turn count + first/last turns.
   const summaryText = opts.summary ?? defaultSummary(session, turns);
   const input = rememberAsCanon(summaryText, session.id, {
     character_id: session.character_ids[0],
@@ -46,10 +44,17 @@ export async function endSession(
   });
   const { rid } = await client.remember(input);
 
-  // Run consolidation
-  const think_result = await client.think(
-    session.world_id ? `world:${session.world_id}` : `character:${session.character_ids[0]}`
-  ).catch(() => undefined);
+  // Run consolidation across EVERY character in the scene so per-character
+  // canon gets merged / deduped and conflicts surface. Also run on the
+  // session namespace so reflex-tier scene memories consolidate / archive.
+  const thinkTargets = [
+    ...session.character_ids.map((id) => `character:${id}`),
+    session.world_id ? `world:${session.world_id}` : null,
+    `session:${session.id}`,
+  ].filter((n): n is string => Boolean(n));
+  const think_result = await Promise.all(
+    thinkTargets.map((ns) => client.think(ns).catch(() => undefined))
+  );
 
   return { session_summary_rid: rid, think_result };
 }

@@ -238,6 +238,101 @@ export class YantrikClient {
     await this.transport.call("memory", { action: "archive", rid });
   }
 
+  /**
+   * Fetch the full record for a single memory by rid.
+   *
+   * `recall` and `memory.list` return lightweight summaries intentionally —
+   * the retrieval hot path can't afford to hydrate full metadata per
+   * candidate. `memory.get` is the "give me the exact record" path.
+   * Use this when you need ground-truth tier / canonical_status /
+   * visible_to / source_turn_id metadata.
+   */
+  async getMemory(rid: string): Promise<{
+    rid: string;
+    text: string;
+    importance: number;
+    certainty?: number;
+    namespace?: string;
+    source?: string;
+    metadata: Record<string, unknown>;
+    created_at?: number;
+  } | null> {
+    try {
+      const res = await this.transport.call("memory", {
+        action: "get",
+        rid,
+      });
+      const parsed = parseMaybeWrapped(res);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const obj = parsed as Record<string, unknown>;
+        if (obj.error) return null;
+        return {
+          rid: String(obj.rid ?? rid),
+          text: String(obj.text ?? ""),
+          importance: Number(obj.importance ?? 0.5),
+          certainty:
+            typeof obj.certainty === "number" ? obj.certainty : undefined,
+          namespace:
+            typeof obj.namespace === "string" ? obj.namespace : undefined,
+          source: typeof obj.source === "string" ? obj.source : undefined,
+          metadata:
+            (obj.metadata as Record<string, unknown>) ??
+            ({} as Record<string, unknown>),
+          created_at:
+            typeof obj.created_at === "number" ? obj.created_at : undefined,
+        };
+      }
+    } catch {
+      // swallow — caller falls back to list-level summary
+    }
+    return null;
+  }
+
+  /**
+   * List memories in a namespace. Used by the memory inspector to populate
+   * the view against a real YantrikDB transport (InMemoryTransport reads
+   * from its own array).
+   *
+   * YantrikDB's MCP surface exposes both `memory action=list` and `recall`
+   * with a broad query; recall returns a cleaner shape for our metadata
+   * needs and reuses a code path that's already battle-tested. We pass an
+   * empty query with a large top_k; YantrikDB treats that as "list all in
+   * namespace" in practice.
+   */
+  async listMemoriesInNamespace(
+    namespace: string,
+    limit: number = 150
+  ): Promise<RecallResponse["results"]> {
+    try {
+      const res = await this.transport.call("memory", {
+        action: "list",
+        namespace,
+        limit,
+      });
+      const parsed = parseMaybeWrapped(res);
+      if (Array.isArray(parsed)) {
+        return parsed as RecallResponse["results"];
+      }
+      if (parsed?.memories && Array.isArray(parsed.memories)) {
+        return parsed.memories as RecallResponse["results"];
+      }
+      // Fall through to recall fallback if list doesn't return an array shape.
+    } catch {
+      // memory.list not available on this server version — recall fallback.
+    }
+    try {
+      const recall = await this.recall({
+        query: "list all memories",
+        namespace,
+        top_k: limit,
+        expand_entities: false,
+      });
+      return recall.results;
+    } catch {
+      return [];
+    }
+  }
+
   async graphRelate(
     entity: string,
     target: string,
@@ -309,6 +404,151 @@ export class YantrikClient {
     );
   }
 
+  /** Pending triggers. YantrikDB returns:
+   *    { trigger_id, trigger_type, urgency, reason, suggested_action, source_rids }
+   *  We normalize to Chronicler-friendly field names but preserve the raw
+   *  response so the UI can show trigger_type as a badge. */
+  async triggerPending(namespace?: string): Promise<
+    Array<{
+      id: string;
+      trigger_type: string;
+      urgency: number;
+      reason: string;
+      suggested_action?: string;
+      source_rids?: string[];
+    }>
+  > {
+    try {
+      const res = await this.transport.call(
+        "trigger",
+        namespace ? { action: "pending", namespace } : { action: "pending" }
+      );
+      const parsed = parseMaybeWrapped(res);
+      const raw = Array.isArray(parsed)
+        ? parsed
+        : (parsed as Record<string, unknown>)?.triggers ??
+          (parsed as Record<string, unknown>)?.pending ??
+          [];
+      if (!Array.isArray(raw)) return [];
+      return (raw as Array<Record<string, unknown>>).map((t) => ({
+        id: String(t.trigger_id ?? t.id ?? ""),
+        trigger_type: String(t.trigger_type ?? t.kind ?? "trigger"),
+        urgency: Number(t.urgency ?? t.pressure ?? 0),
+        reason: String(t.reason ?? t.text ?? t.rationale ?? ""),
+        suggested_action:
+          typeof t.suggested_action === "string"
+            ? t.suggested_action
+            : undefined,
+        source_rids: Array.isArray(t.source_rids)
+          ? (t.source_rids as string[])
+          : undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async triggerAct(id: string): Promise<void> {
+    await this.transport
+      .call("trigger", { action: "act", trigger_id: id })
+      .catch(() => undefined);
+  }
+
+  async triggerDismiss(id: string): Promise<void> {
+    await this.transport
+      .call("trigger", { action: "dismiss", trigger_id: id })
+      .catch(() => undefined);
+  }
+
+  /** Conflict list. YantrikDB returns rids (memory_a, memory_b) — we
+   *  hydrate the texts here so the UI can show them side-by-side. */
+  async conflictList(
+    namespace?: string,
+    limit: number = 500
+  ): Promise<
+    Array<{
+      id: string;
+      conflict_type: string;
+      priority: string;
+      entity?: string;
+      detection_reason?: string;
+      a?: { rid: string; text: string };
+      b?: { rid: string; text: string };
+    }>
+  > {
+    try {
+      const args: Record<string, unknown> = { action: "list", limit };
+      if (namespace) args.namespace = namespace;
+      const res = await this.transport.call("conflict", args);
+      const parsed = parseMaybeWrapped(res);
+      const raw = Array.isArray(parsed)
+        ? parsed
+        : (parsed as Record<string, unknown>)?.conflicts ?? [];
+      if (!Array.isArray(raw)) return [];
+      const normalized = (raw as Array<Record<string, unknown>>).map((c) => ({
+        id: String(c.conflict_id ?? c.id ?? ""),
+        conflict_type: String(c.conflict_type ?? "unknown"),
+        priority: String(c.priority ?? "low"),
+        entity: typeof c.entity === "string" ? c.entity : undefined,
+        detection_reason:
+          typeof c.detection_reason === "string"
+            ? c.detection_reason
+            : undefined,
+        a_rid:
+          typeof c.memory_a === "string"
+            ? c.memory_a
+            : (c.a as { rid?: string } | undefined)?.rid,
+        b_rid:
+          typeof c.memory_b === "string"
+            ? c.memory_b
+            : (c.b as { rid?: string } | undefined)?.rid,
+      }));
+      // Hydrate memory texts for conflicts that might actually need display.
+      // Skip hydration for YantrikDB's own minor+low noise — we'll bulk
+      // dismiss those without ever showing them, so firing 100+ memory.get
+      // calls just to populate text we'll throw away is pure waste.
+      const rids = new Set<string>();
+      for (const n of normalized) {
+        if (n.priority === "low" && n.conflict_type === "minor") continue;
+        if (n.a_rid) rids.add(n.a_rid);
+        if (n.b_rid) rids.add(n.b_rid);
+      }
+      const ridList = [...rids];
+      const records = await Promise.all(
+        ridList.map((rid) => this.getMemory(rid).catch(() => null))
+      );
+      const textByRid = new Map<string, string>();
+      for (let i = 0; i < ridList.length; i++) {
+        const rec = records[i];
+        if (rec) textByRid.set(ridList[i], rec.text);
+      }
+      return normalized.map((n) => ({
+        id: n.id,
+        conflict_type: n.conflict_type,
+        priority: n.priority,
+        entity: n.entity,
+        detection_reason: n.detection_reason,
+        a: n.a_rid
+          ? { rid: n.a_rid, text: textByRid.get(n.a_rid) ?? "(text unavailable)" }
+          : undefined,
+        b: n.b_rid
+          ? { rid: n.b_rid, text: textByRid.get(n.b_rid) ?? "(text unavailable)" }
+          : undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async conflictResolve(
+    id: string,
+    strategy: "keep_a" | "keep_b" | "merge" | "dismiss"
+  ): Promise<void> {
+    await this.transport
+      .call("conflict", { action: "resolve", conflict_id: id, strategy })
+      .catch(() => undefined);
+  }
+
   async personalityGet(characterId: string): Promise<unknown> {
     return this.transport.call("personality", {
       action: "get",
@@ -326,6 +566,23 @@ export class YantrikClient {
       traits,
     });
   }
+}
+
+// --- Helpers ---
+
+function parseMaybeWrapped(res: unknown): Record<string, unknown> | unknown[] | null {
+  const r = res as { result?: unknown };
+  if (typeof r.result === "string") {
+    try {
+      return JSON.parse(r.result);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof res === "object" && res !== null) {
+    return res as Record<string, unknown>;
+  }
+  return null;
 }
 
 // --- Tier-aware convenience helpers ---

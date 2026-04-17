@@ -28,6 +28,10 @@ export interface SessionMeta {
   scene_participants: string[];
   scene_id: string;
   scene_created_at: string;
+  /** If this session was forked from another, the source session id + the
+   *  turn id at which it branched. Used by SessionList to show lineage. */
+  parent_session_id?: string;
+  forked_at_turn_id?: string;
 }
 
 const K_SESSIONS = "chronicler.sessions.v1";
