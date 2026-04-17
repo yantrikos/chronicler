@@ -10,20 +10,42 @@ Chronicler is an open-source, self-hosted roleplay/character-chat app. You run i
 
 ## Quick start
 
-```bash
-git clone https://github.com/yantrikos/chronicler && cd chronicler
-docker compose up -d
-open http://localhost:3001
-```
-
-Both images are published to GitHub Container Registry — first `docker compose up` pulls them (~500 MB total) instead of building locally. If you modify the code, `docker compose build` rebuilds; subsequent `up` uses your rebuilt image.
-
-Prefer no `git clone`? A single-file install:
+**Fastest — one file, no clone:**
 
 ```bash
 curl -O https://raw.githubusercontent.com/yantrikos/chronicler/main/docker-compose.yml
 docker compose up -d
+open http://localhost:3001
 ```
+
+Docker pulls both published images (~500 MB total) from [GitHub Container Registry](https://github.com/orgs/yantrikos/packages) and starts the stack. First boot waits ~60s for YantrikDB to finish loading its embedding model.
+
+**Or clone for development:**
+
+```bash
+git clone https://github.com/yantrikos/chronicler && cd chronicler
+docker compose up -d
+```
+
+`docker compose up` prefers the published image; if you modify the source and run `docker compose build`, it rebuilds locally and your image replaces the pulled one.
+
+## Published images
+
+| Image | Purpose | Size |
+|---|---|---|
+| `ghcr.io/yantrikos/chronicler:latest` | Web + API proxy | ~270 MB |
+| `ghcr.io/yantrikos/chronicler-yantrikdb:latest` | YantrikDB MCP server + CPU-only torch | ~1.9 GB |
+
+Both are multi-platform (linux/amd64 + linux/arm64) and rebuilt on every push to `main` via [`.github/workflows/docker-images.yml`](.github/workflows/docker-images.yml). Semver tags (`v0.1.0`, etc.) publish stable versions as they're cut.
+
+## First-run in the app
+
+1. **Settings → Your persona** — name + optional description
+2. **Settings → Providers** — add Ollama (local), OpenAI-compat, or Anthropic with a model name
+3. **Settings → Extraction provider** (optional) — small/fast model for background fact extraction (e.g. `qwen2.5:1.5b`)
+4. **Settings → Proactive messages** — off by default; `passive` lets the character take initiative when urges accumulate and you've been idle
+5. **+ card** to import a v2/v3 character card, or **demo: Ren** to try the built-in character
+6. Type. Memories appear in the right sidebar as they land.
 
 First-run flow:
 
@@ -68,6 +90,15 @@ Because the above is wasted if you can't actually RP:
 - **Group chats** — add a second character; each turn composes context from that character's POV only (privacy ACLs enforced live).
 
 ---
+
+## Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Pulls the latest published images and restarts. Your memory DB persists in the named volume (`chronicler-memory`) across restarts.
 
 ## Stack
 
