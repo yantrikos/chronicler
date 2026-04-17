@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0a0c"/>
+      <stop offset="1" stop-color="#18181b"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10b981"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <!-- mark, centered-left -->
+  <g transform="translate(120, 200)">
+    <rect width="200" height="200" rx="44" fill="url(#mark)"/>
+    <rect x="52" y="58" width="70" height="20" rx="5" fill="#f8fafc"/>
+    <rect x="52" y="90" width="98" height="20" rx="5" fill="#f8fafc" fill-opacity="0.6"/>
+    <rect x="52" y="122" width="86" height="20" rx="5" fill="#f8fafc" fill-opacity="0.3"/>
+  </g>
+  <!-- wordmark + tagline -->
+  <g transform="translate(380, 250)">
+    <text x="0" y="60" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="104" font-weight="600" fill="#e4e4e7" letter-spacing="-2">Chronicler</text>
+    <text x="0" y="120" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="36" font-weight="400" fill="#a1a1aa">Local-first roleplay with living memory.</text>
+    <text x="0" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24" font-weight="400" fill="#52525b">docker compose up</text>
+  </g>
+</svg>

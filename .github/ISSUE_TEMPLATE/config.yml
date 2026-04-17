@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Session-level bug (involves content)
+    url: mailto:developer@pranab.co.in
+    about: Email private. Chronicler sessions contain sensitive content by default — do not paste transcripts into public trackers.
+  - name: Structural bug / setup failure
+    url: https://github.com/yantrikos/chronicler/discussions
+    about: Use Discussions Q&A for setup, crashes, build errors — things that don't involve session content.
+  - name: Ideas / architectural discussion
+    url: https://github.com/yantrikos/chronicler/discussions
+    about: Use Discussions Ideas category for design discussion, feature proposals, YantrikDB pattern questions.

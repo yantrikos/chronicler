@@ -1,0 +1,50 @@
+# Chronicler self-hosted stack.
+#
+#   docker compose up -d    # start
+#   docker compose logs -f  # follow logs
+#   docker compose down     # stop (data persists in the named volumes)
+#
+# Open http://localhost:3001 in your browser once the services are healthy.
+# The chronicler service binds to 127.0.0.1 by default — see notes at the
+# bottom of this file for exposing it beyond localhost.
+
+services:
+  yantrikdb:
+    # YantrikDB — local-first cognitive memory. Persists under the
+    # `chronicler-memory` volume. Keep bound to the internal docker network;
+    # chronicler accesses it as http://yantrikdb:8420.
+    build:
+      context: .
+      dockerfile: yantrikdb.Dockerfile
+    restart: unless-stopped
+    environment:
+      YANTRIKDB_DB_PATH: /data/memory.db
+      YANTRIKDB_API_KEY: ${YANTRIKDB_API_KEY:-}
+    volumes:
+      - chronicler-memory:/data
+    expose:
+      - "8420"
+
+  chronicler:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      yantrikdb:
+        condition: service_healthy
+    environment:
+      CHRONICLER_PORT: "3001"
+      CHRONICLER_BIND: "0.0.0.0"
+      CHRONICLER_YANTRIKDB_URL: "http://yantrikdb:8420/mcp"
+      CHRONICLER_YANTRIKDB_TOKEN: "${YANTRIKDB_API_KEY:-}"
+    ports:
+      - "127.0.0.1:3001:3001"
+
+volumes:
+  chronicler-memory:
+
+# ---
+# Exposing beyond localhost:
+#   Edit ports: `3001:3001` (drops the 127.0.0.1 binding). Do NOT do this
+#   on an untrusted network. Chronicler has no built-in auth — add a
+#   reverse proxy (Caddy / Traefik) with auth, or tunnel via Tailscale.
+# ---

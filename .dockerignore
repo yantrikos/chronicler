@@ -1,0 +1,13 @@
+node_modules
+dist
+.yantrikdb
+~/.chronicler
+.env
+.env.*
+.git
+.github
+docs
+tests
+scripts
+*.md
+!README.md
