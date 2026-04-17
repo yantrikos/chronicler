@@ -11,9 +11,18 @@ Chronicler is an open-source, self-hosted roleplay/character-chat app. You run i
 ## Quick start
 
 ```bash
-git clone <repo> chronicler && cd chronicler
+git clone https://github.com/yantrikos/chronicler && cd chronicler
 docker compose up -d
 open http://localhost:3001
+```
+
+Both images are published to GitHub Container Registry — first `docker compose up` pulls them (~500 MB total) instead of building locally. If you modify the code, `docker compose build` rebuilds; subsequent `up` uses your rebuilt image.
+
+Prefer no `git clone`? A single-file install:
+
+```bash
+curl -O https://raw.githubusercontent.com/yantrikos/chronicler/main/docker-compose.yml
+docker compose up -d
 ```
 
 First-run flow:

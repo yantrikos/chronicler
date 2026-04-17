@@ -13,6 +13,11 @@ services:
     # YantrikDB — local-first cognitive memory. Persists under the
     # `chronicler-memory` volume. Keep bound to the internal docker network;
     # chronicler accesses it as http://yantrikdb:8420.
+    #
+    # Using the pre-built image from GHCR by default. Falls back to a local
+    # build (yantrikdb.Dockerfile) when the image isn't available or when
+    # `docker compose build` is run explicitly.
+    image: ghcr.io/yantrikos/chronicler-yantrikdb:latest
     build:
       context: .
       dockerfile: yantrikdb.Dockerfile
@@ -26,6 +31,10 @@ services:
       - "8420"
 
   chronicler:
+    # Web + API proxy. Same image+build fallback pattern as yantrikdb so
+    # `docker compose up` pulls the published image first, rebuilds locally
+    # only if you're developing.
+    image: ghcr.io/yantrikos/chronicler:latest
     build: .
     restart: unless-stopped
     depends_on:
