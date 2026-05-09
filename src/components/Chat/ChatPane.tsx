@@ -11,6 +11,9 @@ interface Props {
   speakerNames?: Record<string, string>;
   speakerAvatars?: Record<string, string>;
   streamingText?: string;
+  /** When set, the bubble with this id gets a brief highlight ring so the
+   *  user can spot the search-jumped target. */
+  highlightTurnId?: string;
   onEditMessage?: (turnId: string, newContent: string) => void | Promise<void>;
   onDeleteMessage?: (turnId: string) => void | Promise<void>;
   onRegenerate?: (turnId: string) => void | Promise<void>;
@@ -29,6 +32,7 @@ export function ChatPane({
   speakerNames = {},
   speakerAvatars = {},
   streamingText,
+  highlightTurnId,
   onEditMessage,
   onDeleteMessage,
   onRegenerate,
@@ -87,6 +91,7 @@ export function ChatPane({
             isLastAssistant={
               idx === turns.length - 1 && t.role === "assistant"
             }
+            isHighlighted={t.id === highlightTurnId}
             displayName={speakerNames[t.speaker]}
             avatarUrl={speakerAvatars[t.speaker]}
             onEdit={onEditMessage}
@@ -163,6 +168,7 @@ interface BubbleProps {
   displayName?: string;
   avatarUrl?: string;
   isLastAssistant: boolean;
+  isHighlighted?: boolean;
   onEdit?: (turnId: string, newContent: string) => void | Promise<void>;
   onDelete?: (turnId: string) => void | Promise<void>;
   onRegenerate?: (turnId: string) => void | Promise<void>;
@@ -176,6 +182,7 @@ function MessageBubble({
   displayName,
   avatarUrl,
   isLastAssistant,
+  isHighlighted,
   onEdit,
   onDelete,
   onRegenerate,
@@ -222,7 +229,10 @@ function MessageBubble({
 
   return (
     <div
-      className={`group flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}
+      id={`turn-${turn.id}`}
+      className={`group flex gap-2 ${isUser ? "justify-end" : "justify-start"} ${
+        isHighlighted ? "ring-2 ring-emerald-500/60 rounded-xl" : ""
+      } transition-shadow`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

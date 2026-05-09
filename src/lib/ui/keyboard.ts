@@ -9,6 +9,8 @@ export interface Shortcuts {
   onEscape?: () => void;
   /** ⌘/Ctrl+G — regenerate the last assistant turn. */
   onRegenerateLast?: () => void;
+  /** ⌘/Ctrl+F — open chat search overlay. */
+  onSearch?: () => void;
   /** ? — toggle help overlay. */
   onHelp?: () => void;
 }
@@ -39,6 +41,9 @@ export function useKeyboardShortcuts(sc: Shortcuts): void {
       } else if (isMeta && e.key.toLowerCase() === "g") {
         e.preventDefault();
         sc.onRegenerateLast?.();
+      } else if (isMeta && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        sc.onSearch?.();
       } else if (e.key === "?" && !isMeta) {
         e.preventDefault();
         sc.onHelp?.();
@@ -46,5 +51,5 @@ export function useKeyboardShortcuts(sc: Shortcuts): void {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sc.onFocusInput, sc.onEscape, sc.onRegenerateLast, sc.onHelp]);
+  }, [sc.onFocusInput, sc.onEscape, sc.onRegenerateLast, sc.onSearch, sc.onHelp]);
 }

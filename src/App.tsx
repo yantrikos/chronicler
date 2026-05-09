@@ -13,6 +13,9 @@ import {
 } from "./components/Inspector/ThinkPanel";
 import { SettingsPanel } from "./components/Settings/SettingsPanel";
 import { CharacterLibrary } from "./components/Library/CharacterLibrary";
+import { CharacterEditor } from "./components/Library/CharacterEditor";
+import { LorebookEditor } from "./components/Library/LorebookEditor";
+import { ChatSearch } from "./components/Chat/ChatSearch";
 import { Logo, Mark } from "./components/Brand/Logo";
 import { EmptyState } from "./components/Brand/EmptyState";
 import { HelpOverlay } from "./components/Brand/HelpOverlay";
@@ -200,6 +203,10 @@ function App() {
   const [authorNoteOpen, setAuthorNoteOpen] = useState(false);
   const [greetingIndex, setGreetingIndex] = useState<number>(0);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null);
+  const [lorebookCharacterId, setLorebookCharacterId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [highlightTurnId, setHighlightTurnId] = useState<string | undefined>(undefined);
   // Cache of full memory records (populated via memory.get). Avoids re-fetching
   // the same rid on every refresh.
   const metaCacheRef = useRef<Map<string, Record<string, unknown>>>(new Map());
@@ -907,6 +914,10 @@ function App() {
         name: decomposed.name,
         world_id: decomposed.world_id,
         description: parsed.card.data.description,
+        personality: parsed.card.data.personality,
+        scenario: parsed.card.data.scenario,
+        mes_example: parsed.card.data.mes_example,
+        tags: parsed.card.data.tags,
         avatar_url: parsed.avatar_url,
         greetings: decomposed.greetings,
         raw_card: parsed.raw_json,
@@ -1239,6 +1250,12 @@ function App() {
   useKeyboardShortcuts({
     onEscape: () => {
       if (helpOpen) setHelpOpen(false);
+      else if (searchOpen) {
+        setSearchOpen(false);
+        setHighlightTurnId(undefined);
+      }
+      else if (lorebookCharacterId) setLorebookCharacterId(null);
+      else if (editingCharacterId) setEditingCharacterId(null);
       else if (promptInspectorOpen) setPromptInspectorOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (authorNoteOpen) setAuthorNoteOpen(false);
@@ -1253,6 +1270,7 @@ function App() {
       const last = [...turns].reverse().find((t) => t.role === "assistant");
       if (last) onRegenerate(last.id);
     },
+    onSearch: () => setSearchOpen((v) => !v),
     onHelp: () => setHelpOpen(true),
   });
 
@@ -1476,8 +1494,40 @@ function App() {
               setLibraryCharacters(listCharacters());
             });
           }}
+          onEditCharacter={(id) => setEditingCharacterId(id)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
+        {editingCharacterId &&
+          (() => {
+            const target = libraryCharacters.find(
+              (c) => c.id === editingCharacterId
+            );
+            if (!target) return null;
+            return (
+              <CharacterEditor
+                character={target}
+                client={clientRef.current}
+                onOpenLorebook={() => {
+                  setLorebookCharacterId(target.id);
+                  setEditingCharacterId(null);
+                }}
+                onClose={() => setEditingCharacterId(null)}
+                onSave={async (updated) => {
+                  storeSaveCharacter(updated);
+                  setLibraryCharacters(listCharacters());
+                  setCharacters((cs) =>
+                    cs.map((c) => (c.id === updated.id ? updated : c))
+                  );
+                  if (updated.system_prompt) {
+                    setSystemPrompts((p) => ({
+                      ...p,
+                      [updated.id]: updated.system_prompt as string,
+                    }));
+                  }
+                }}
+              />
+            );
+          })()}
         {settingsOpen && (
           <SettingsPanel
             config={config}
@@ -1716,6 +1766,7 @@ function App() {
                   .filter((c) => c.avatar_url)
                   .map((c) => [c.id, c.avatar_url as string])
               )}
+              highlightTurnId={highlightTurnId}
               onEditMessage={onEditMessage}
               onDeleteMessage={onDeleteMessage}
               onRegenerate={onRegenerate}
@@ -1781,7 +1832,50 @@ function App() {
           onClose={() => setPromptInspectorOpen(false)}
         />
       )}
+      {searchOpen && (
+        <ChatSearch
+          currentTurns={turns}
+          currentSessionId={sessionId}
+          onClose={() => {
+            setSearchOpen(false);
+            setHighlightTurnId(undefined);
+          }}
+          onJumpToTurn={(turnId) => {
+            setHighlightTurnId(turnId);
+            const el = document.getElementById(`turn-${turnId}`);
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }}
+          onJumpToSession={async (newSessionId, turnId) => {
+            await switchSession(newSessionId);
+            // give React a tick to render the new session's turns, then jump
+            setTimeout(() => {
+              setHighlightTurnId(turnId);
+              const el = document.getElementById(`turn-${turnId}`);
+              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }, 100);
+          }}
+        />
+      )}
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      {lorebookCharacterId &&
+        (() => {
+          const target = libraryCharacters.find(
+            (c) => c.id === lorebookCharacterId
+          );
+          if (!target) return null;
+          return (
+            <LorebookEditor
+              characterId={target.id}
+              characterName={target.name}
+              worldId={target.world_id}
+              client={clientRef.current}
+              onClose={() => {
+                setLorebookCharacterId(null);
+                refreshMemories();
+              }}
+            />
+          );
+        })()}
     </div>
   );
 }

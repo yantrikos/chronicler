@@ -16,6 +16,7 @@ interface Props {
   onImportFile: (file: File) => void;
   onDemo: () => void;
   onDeleteCharacter?: (id: string) => void;
+  onEditCharacter?: (id: string) => void;
   onOpenSettings: () => void;
 }
 
@@ -27,6 +28,7 @@ export function CharacterLibrary({
   onImportFile,
   onDemo,
   onDeleteCharacter,
+  onEditCharacter,
   onOpenSettings,
 }: Props) {
   const [q, setQ] = useState("");
@@ -133,6 +135,9 @@ export function CharacterLibrary({
                         ? () => onDeleteCharacter(c.id)
                         : undefined
                     }
+                    onEdit={
+                      onEditCharacter ? () => onEditCharacter(c.id) : undefined
+                    }
                   />
                 );
               })}
@@ -150,12 +155,14 @@ function CharacterCard({
   onOpen,
   onNewSession,
   onDelete,
+  onEdit,
 }: {
   character: Character;
   stats?: { sessions: number; turns: number; last_at: string };
   onOpen: () => void;
   onNewSession: () => void;
   onDelete?: () => void;
+  onEdit?: () => void;
 }) {
   const initials = character.name
     .split(/\s+/)
@@ -223,6 +230,18 @@ function CharacterCard({
         >
           + new chat
         </button>
+        {onEdit && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            className="text-[10px] rounded bg-neutral-900/80 hover:bg-neutral-700 text-neutral-200 px-1.5 py-0.5 backdrop-blur"
+            title="edit character"
+          >
+            ✎
+          </button>
+        )}
         {onDelete && (
           <button
             onClick={(e) => {

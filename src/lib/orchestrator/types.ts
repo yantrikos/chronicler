@@ -36,9 +36,17 @@ export interface Character {
   /** Data URL of the card's avatar image, when known. */
   avatar_url?: string;
   description?: string;
+  /** Personality field from the card. Editable in the in-app character editor. */
+  personality?: string;
+  /** Scenario / setting where the chat takes place. */
+  scenario?: string;
+  /** Example dialogues from the card (mes_example). */
+  mes_example?: string;
   /** first_mes + alternate_greetings from the card, in order. The first
    *  entry is the default. */
   greetings?: string[];
+  /** Tags from the card metadata. */
+  tags?: string[];
   /** Full system prompt derived from the card (for re-loading across sessions). */
   system_prompt?: string;
   /** Original card JSON (for round-trip export). */

@@ -4,11 +4,12 @@ interface Props {
 
 const SHORTCUTS: Array<[string, string]> = [
   ["⌘K / Ctrl+K", "Focus the chat input"],
+  ["⌘F / Ctrl+F", "Search the current session (and optionally all sessions)"],
   ["⌘G / Ctrl+G", "Regenerate the last reply (new swipe)"],
   ["⌘Enter in edit", "Save an inline message edit"],
   ["Esc", "Close any open modal or panel"],
   ["Enter", "Send message (Shift+Enter for newline)"],
-  ["Hover a message", "Reveal edit / delete / regenerate / continue toolbar"],
+  ["Hover a message", "Reveal edit / delete / regenerate / continue / fork toolbar"],
   ["‹ ›", "On last reply: previous / next swipe (or generate new)"],
   ["?", "Show this help"],
 ];
