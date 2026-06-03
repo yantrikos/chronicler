@@ -6,6 +6,8 @@ import {
   saveConfig,
 } from "../../lib/config";
 import { PROVIDER_TEMPLATES } from "../../lib/providers/templates";
+import type { McpServerRegistry } from "../../lib/mcp/registry";
+import { McpServersSection } from "./McpServersSection";
 
 interface Props {
   config: ChroniclerConfig;
@@ -13,6 +15,7 @@ interface Props {
   onSave: (cfg: ChroniclerConfig) => void;
   onExportBackup?: () => void;
   onImportBackup?: (file: File) => void | Promise<void>;
+  mcpRegistry?: McpServerRegistry;
 }
 
 export function SettingsPanel({
@@ -21,6 +24,7 @@ export function SettingsPanel({
   onSave,
   onExportBackup,
   onImportBackup,
+  mcpRegistry,
 }: Props) {
   const [draft, setDraft] = useState<ChroniclerConfig>(config);
 
@@ -373,6 +377,12 @@ export function SettingsPanel({
             </div>
           </div>
         </section>
+
+        {mcpRegistry && (
+          <section className="px-5 py-4 border-t border-neutral-800">
+            <McpServersSection registry={mcpRegistry} />
+          </section>
+        )}
 
         <footer className="px-5 py-3 border-t border-neutral-800 flex items-center justify-between gap-2">
           <div className="flex gap-1.5">

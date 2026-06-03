@@ -70,6 +70,7 @@ import { PreferenceInspector } from "./components/Inspector/PreferenceInspector"
 import { PluginHost } from "./lib/grimoire/host";
 import { LocalStorageBackend } from "./lib/grimoire/sdk-runtime";
 import { loadInTreePlugins } from "./lib/grimoire/loader";
+import { McpServerRegistry } from "./lib/mcp/registry";
 import {
   SkillOutcomeTracker,
   type SkillObservation,
@@ -337,6 +338,10 @@ function App() {
    *  plugins, hook registrations, slash commands — survives provider/config
    *  changes). The orchestrator picks it up by ref. */
   const grimoireHostRef = useRef<PluginHost | null>(null);
+  /** External MCP server registry — third-party servers users register
+   *  for TTS / image gen / dice / web search / etc. Persists configs to
+   *  localStorage; clients lazy-connect on first use. */
+  const mcpRegistryRef = useRef<McpServerRegistry>(new McpServerRegistry());
   const [grimoireSlashCommands, setGrimoireSlashCommands] = useState<
     { name: string; description: string }[]
   >([]);
@@ -2859,6 +2864,7 @@ function App() {
             }}
             onExportBackup={onExportBackup}
             onImportBackup={onImportBackup}
+            mcpRegistry={mcpRegistryRef.current}
           />
         )}
       </div>
@@ -3431,6 +3437,7 @@ function App() {
           }}
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
+          mcpRegistry={mcpRegistryRef.current}
         />
       )}
       {promptInspectorOpen && (
