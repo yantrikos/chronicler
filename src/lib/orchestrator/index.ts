@@ -38,6 +38,11 @@ export interface OrchestratorDeps {
    *  "suppressed" or "archived" keeps the skill out of the prompt; unknown
    *  is treated as "candidate". Wire from SkillOutcomeTracker.refreshState. */
   getSkillState?: (skill_id: string) => SkillState | undefined;
+  /** Optional Grimoire plugin host. When set, lifecycle hooks fire at
+   *  beforeChat / afterChat / afterWrite seams so plugins can observe or
+   *  modify the turn. Hook errors are isolated — a misbehaving plugin
+   *  cannot break the turn. */
+  grimoire?: import("../grimoire/host").PluginHost;
 }
 
 export class Orchestrator {
@@ -175,6 +180,29 @@ export class Orchestrator {
       this.lastCapture.token_estimate.system +
       this.lastCapture.token_estimate.messages;
 
+    // Grimoire beforeChat hook: plugins can mutate system prompt or messages.
+    if (this.deps.grimoire) {
+      const result = await this.deps.grimoire.dispatchHook("beforeChat", {
+        sessionId: req.session_id,
+        character: req.character,
+        systemPrompt: rendered.system,
+        messages: rendered.history.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      });
+      rendered.system = result.systemPrompt;
+      // Allow plugins to mutate the message stream in-flight (rare, but
+      // useful for prefix-injection plugins). Map back to typed history.
+      if (Array.isArray(result.messages) && result.messages.length === rendered.history.length) {
+        rendered.history = result.messages.map((m, i) => ({
+          ...rendered.history[i],
+          role: rendered.history[i].role,
+          content: m.content,
+        }));
+      }
+    }
+
     const chatReq = {
       model: this.deps.model,
       system: rendered.system,
@@ -195,6 +223,21 @@ export class Orchestrator {
       reply = await this.deps.provider.chat(chatReq);
     }
     const t2 = performance.now();
+
+    // Grimoire afterChat hook: plugins observe the raw reply; augmenters
+    // may rewrite content via the returned context.
+    if (this.deps.grimoire) {
+      const result = await this.deps.grimoire.dispatchHook("afterChat", {
+        sessionId: req.session_id,
+        character: req.character,
+        reply: { content: reply.content },
+      });
+      if (result.mutatedContent && typeof result.mutatedContent === "string") {
+        reply = { content: result.mutatedContent };
+      } else {
+        reply = { content: result.reply.content };
+      }
+    }
 
     const assistant_turn: ChatTurn = {
       id: crypto.randomUUID(),
@@ -231,6 +274,17 @@ export class Orchestrator {
         await reinforceAndMaybePromote(this.deps.client, composed.heuristic, {
           session_id: req.session_id,
         });
+        // Grimoire afterWrite hook: plugins observe finalized turns.
+        // Errors are isolated per plugin and don't surface here.
+        if (this.deps.grimoire) {
+          await this.deps.grimoire.dispatchHook("afterWrite", {
+            sessionId: req.session_id,
+            character: req.character,
+            userTurn: req.user_message,
+            assistantTurn: assistant_turn,
+            turnCount: recent.length + 1,
+          });
+        }
       } catch (err) {
         console.error("[orchestrator] post-turn writes failed", err);
       } finally {

@@ -67,6 +67,9 @@ import {
   type CharacterPrefSettings,
 } from "./lib/preferences/store";
 import { PreferenceInspector } from "./components/Inspector/PreferenceInspector";
+import { PluginHost } from "./lib/grimoire/host";
+import { LocalStorageBackend } from "./lib/grimoire/sdk-runtime";
+import { loadInTreePlugins } from "./lib/grimoire/loader";
 import {
   SkillOutcomeTracker,
   type SkillObservation,
@@ -330,6 +333,13 @@ function App() {
   const skillFormerRef = useRef<SkillFormer | null>(null);
   const driftFormerRef = useRef<DriftFormer | null>(null);
   const preferenceFormerRef = useRef<PreferenceFormer | null>(null);
+  /** Grimoire plugin host. Lives across rebuilds (its state — loaded
+   *  plugins, hook registrations, slash commands — survives provider/config
+   *  changes). The orchestrator picks it up by ref. */
+  const grimoireHostRef = useRef<PluginHost | null>(null);
+  const [grimoireSlashCommands, setGrimoireSlashCommands] = useState<
+    { name: string; description: string }[]
+  >([]);
   const skillTrackerRef = useRef<SkillOutcomeTracker | null>(null);
   // Per-skill derived state. Populated lazily by the outcome tracker on
   // every record/refresh; consumed by the orchestrator's getSkillState
@@ -355,9 +365,12 @@ function App() {
   // derived state inside getSkillState.
   const skillOverridesRef = useRef<Map<string, SkillState>>(new Map());
   const [inspectedSkills, setInspectedSkills] = useState<InspectorSkill[]>([]);
-  const [inspectorTab, setInspectorTab] = useState<
-    "memory" | "skills" | "preferences" | "threads" | "arcs"
-  >("memory");
+  const [inspectorTab, setInspectorTab] = useState<string>("memory");
+  // Bumps whenever a Grimoire plugin loads/unloads or registers a slot —
+  // forces the tab strip + slash autocomplete to re-render. The value
+  // itself is referenced below in JSX to make React track it as a dep.
+  const [grimoireVersion, setGrimoireVersion] = useState(0);
+  void grimoireVersion;
   /** Active character preferences pulled from the preferences:<id>
    *  namespace. Repopulated on character change + after PreferenceFormer
    *  runs. */
@@ -661,9 +674,94 @@ function App() {
         getSkillState: (skill_id) =>
           skillOverridesRef.current.get(skill_id) ??
           skillStateRef.current.get(skill_id),
+        grimoire: grimoireHostRef.current ?? undefined,
       }),
-    [turns, config]
+    [turns, config, grimoireSlashCommands]
   );
+
+  // Initialize Grimoire host once. The host's lifecycle is independent of
+  // the orchestrator's rebuild cycle — plugins stay loaded across config
+  // changes. The orchestrator picks up the host via the closure above.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const host = new PluginHost({
+        client: clientRef.current,
+        provider: providerRef.current,
+        model: modelRef.current,
+        storage: new LocalStorageBackend(),
+      });
+      grimoireHostRef.current = host;
+      // Subscribe to host version bumps — when plugins load/unload or
+      // register slots, re-read the contribution lists into React state.
+      const unsubscribe = host.subscribe(() => {
+        if (cancelled) return;
+        setGrimoireSlashCommands(
+          host.commands.list().map((c) => ({
+            name: c.name,
+            description: c.description,
+          }))
+        );
+        setGrimoireVersion(host.getVersion());
+      });
+      try {
+        await loadInTreePlugins(host);
+      } catch (e) {
+        console.warn("[grimoire] in-tree loader failed", e);
+      }
+      if (cancelled) {
+        unsubscribe();
+        return;
+      }
+      setGrimoireSlashCommands(
+        host.commands.list().map((c) => ({
+          name: c.name,
+          description: c.description,
+        }))
+      );
+      setGrimoireVersion(host.getVersion());
+      // Tee the unsubscribe so the cleanup function below can call it.
+      (host as unknown as { __unsubscribe?: () => void }).__unsubscribe = unsubscribe;
+    })();
+    return () => {
+      cancelled = true;
+      const h = grimoireHostRef.current;
+      if (h) {
+        const unsub = (h as unknown as { __unsubscribe?: () => void })
+          .__unsubscribe;
+        if (unsub) unsub();
+        void h.unloadAll();
+      }
+      grimoireHostRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Invoke a Grimoire slash command from the chat input. SlashResult is
+   *  rendered as a synthetic system-role turn so the user sees it in the
+   *  chat history. Errors get a distinct visual treatment via the role. */
+  async function onSlashCommand(name: string, args: string): Promise<void> {
+    const host = grimoireHostRef.current;
+    if (!host) {
+      console.warn("[grimoire] no host available for /" + name);
+      return;
+    }
+    const result = await host.triggerCommand(name, args);
+    if (!result) return;
+    // Build a system turn so the result appears in the chat history.
+    const synthetic: ChatTurn = {
+      id: crypto.randomUUID(),
+      role: "system",
+      speaker: result.kind === "error" ? "system:error" : "system:slash",
+      content:
+        result.kind === "error"
+          ? `⚠ ${result.content}`
+          : result.content,
+      created_at: new Date().toISOString(),
+      session_id: sessionId ?? "no-session",
+    };
+    setTurns((prev) => [...prev, synthetic]);
+  }
 
   async function refreshThinkPanel(ns: string) {
     const client = clientRef.current;
@@ -3067,6 +3165,8 @@ function App() {
               onSend={onSend}
               isThinking={thinking}
               streamingText={streamingText}
+              slashCommands={grimoireSlashCommands}
+              onSlashCommand={onSlashCommand}
               recap={recap}
               activeArcsLine={summarizeActiveArcs(arcs)}
               characterName={
@@ -3193,6 +3293,25 @@ function App() {
             >
               arcs{arcVisibleCount > 0 ? ` · ${arcVisibleCount}` : ""}
             </button>
+            {/* Grimoire-contributed inspector tabs. Re-renders when
+              * grimoireVersion bumps (plugin load/unload). */}
+            {grimoireHostRef.current?.slots.get("inspector:tab").map((c) => {
+              const tabId = `grimoire:${c.pluginId}`;
+              return (
+                <button
+                  key={tabId}
+                  className={`flex-1 px-3 py-1.5 text-left ${
+                    inspectorTab === tabId
+                      ? "text-neutral-100 border-b-2 border-violet-500/60"
+                      : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                  onClick={() => setInspectorTab(tabId)}
+                  title={`Grimoire: ${c.pluginId}`}
+                >
+                  {c.title ?? c.pluginId.split(".").pop()}
+                </button>
+              );
+            })}
           </div>
           <div className="flex-1 min-h-0">
             {inspectorTab === "memory" ? (
@@ -3265,7 +3384,7 @@ function App() {
                   void rid;
                 }}
               />
-            ) : (
+            ) : inspectorTab === "arcs" ? (
               <ArcInspector
                 arcs={arcs}
                 overrides={arcOverridesRef.current}
@@ -3276,7 +3395,28 @@ function App() {
                   void rid;
                 }}
               />
-            )}
+            ) : inspectorTab.startsWith("grimoire:") ? (
+              (() => {
+                const pluginId = inspectorTab.slice("grimoire:".length);
+                const contrib = grimoireHostRef.current
+                  ?.slots.get("inspector:tab")
+                  .find((c) => c.pluginId === pluginId);
+                if (!contrib) {
+                  return (
+                    <div className="p-6 text-xs text-neutral-500">
+                      Plugin {pluginId} no longer contributes to this slot.
+                    </div>
+                  );
+                }
+                const Component = contrib.component;
+                return (
+                  <Component
+                    pluginId={pluginId}
+                    characterId={characters[0]?.id ?? null}
+                  />
+                );
+              })()
+            ) : null}
           </div>
         </div>
       </aside>

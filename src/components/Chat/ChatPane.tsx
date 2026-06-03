@@ -25,6 +25,12 @@ interface Props {
   onImpersonate?: (currentDraft: string) => Promise<string | null>;
   onSwipeChange?: (turnId: string, newIndex: number) => void;
   onFork?: (turnId: string) => void | Promise<void>;
+  /** Grimoire slash commands available in this session. Pass the list +
+   *  the invocation handler from App.tsx. When provided, typing "/" in the
+   *  input shows an autocomplete; submitting a /command routes through
+   *  onSlashCommand instead of onSend. */
+  slashCommands?: { name: string; description: string }[];
+  onSlashCommand?: (name: string, args: string) => Promise<void>;
 }
 
 export function ChatPane({
@@ -45,6 +51,8 @@ export function ChatPane({
   onImpersonate,
   onSwipeChange,
   onFork,
+  slashCommands = [],
+  onSlashCommand,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [impersonating, setImpersonating] = useState(false);
@@ -53,10 +61,32 @@ export function ChatPane({
   async function submit() {
     const text = draft.trim();
     if (!text || isThinking) return;
+    // Slash command path: route through onSlashCommand (Grimoire host)
+    // instead of treating it as a regular chat message.
+    if (text.startsWith("/") && onSlashCommand) {
+      const space = text.indexOf(" ");
+      const name = (space === -1 ? text.slice(1) : text.slice(1, space)).trim();
+      const args = space === -1 ? "" : text.slice(space + 1).trim();
+      setDraft("");
+      await onSlashCommand(name, args);
+      taRef.current?.focus();
+      return;
+    }
     setDraft("");
     await onSend(text);
     taRef.current?.focus();
   }
+
+  // Compute autocomplete matches when draft starts with "/" and no space yet.
+  const slashMatches = (() => {
+    if (!onSlashCommand || !draft.startsWith("/") || draft.includes(" ")) {
+      return [] as { name: string; description: string }[];
+    }
+    const prefix = draft.slice(1).toLowerCase();
+    return slashCommands
+      .filter((c) => c.name.toLowerCase().startsWith(prefix))
+      .slice(0, 6);
+  })();
 
   async function impersonate() {
     if (!onImpersonate || impersonating || isThinking) return;
@@ -153,6 +183,27 @@ export function ChatPane({
           )}
       </div>
 
+      {slashMatches.length > 0 && (
+        <div className="border-t border-neutral-800 bg-neutral-950 px-4 py-1.5 text-[11px] space-y-0.5">
+          <p className="text-neutral-500 uppercase tracking-wider text-[9px] mb-1">
+            Slash commands
+          </p>
+          {slashMatches.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              onClick={() => {
+                setDraft("/" + c.name + " ");
+                taRef.current?.focus();
+              }}
+              className="block w-full text-left rounded px-2 py-1 hover:bg-neutral-800/60"
+            >
+              <span className="text-emerald-400 font-mono">/{c.name}</span>
+              <span className="text-neutral-500 ml-2">{c.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <form
         className="border-t border-neutral-800 px-4 py-3 flex gap-2 items-end"
         onSubmit={(e) => {
@@ -170,7 +221,7 @@ export function ChatPane({
               submit();
             }
           }}
-          placeholder="Type a message. Shift+Enter for newline. **markdown** works."
+          placeholder="Type a message, or '/' for slash commands. Shift+Enter for newline."
           rows={2}
           className="flex-1 rounded-md bg-neutral-800 text-neutral-100 border border-neutral-700 px-3 py-2 text-sm resize-none focus:outline-none focus:border-neutral-500"
         />

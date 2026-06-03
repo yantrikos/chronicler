@@ -48,7 +48,7 @@ Legend: ✅ first-class · 🟡 partial / via plugin · ❌ absent / not designe
 | Multi-user / shared worlds | ❌ single-user | 🟡 instance-per-user | ❌ | ✅ designed for it |
 | Provider support (OpenAI / Anthropic / Ollama / OpenRouter / local) | ✅ | ✅ most extensive | ✅ | ✅ |
 | **Output filtering** (any kind) | ❌ never — explicitly NSFW-affirming | ❌ | ❌ | ❌ |
-| Extension ecosystem | ❌ no plugin API yet | ✅ huge | 🟡 themes / scripts | 🟡 |
+| Extension ecosystem | 🟡 **Grimoire** (v0.3) — typed SDK, hooks (observer/augmenter/strategy), slash commands, hot reload, MCP registration. MCP tool calling + UI slots + dynamic install land in v0.4 | ✅ huge | 🟡 themes / scripts | 🟡 |
 | **Maturity** | | | | |
 | First release | 2026 | 2023 | 2023 | 2023 |
 | Public install base | small (early) | very large | large | medium |
