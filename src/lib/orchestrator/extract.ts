@@ -79,18 +79,21 @@ export class LlmExtractor implements Extractor {
     const characterName = input.character.name;
 
     const system = `\
-You extract durable facts from a two-turn roleplay exchange and classify them into three tiers. Return STRICT JSON only, no commentary.
+You extract durable facts and observations from a two-turn roleplay exchange and classify them into three tiers. Return STRICT JSON only, no commentary.
 
 TIERS:
-- "canon": facts the USER asserts about themselves, the real world, or commits explicitly. Examples: "My cat's name is Kiku", "Remember that I grew up in Tokyo", "My birthday is in April". Character's in-fiction actions (walking, picking up items, saying dialogue) are NOT canon. In-character declarations ("I love you") are NOT canon unless out-of-roleplay frame is clear.
-- "heuristic": inferences about the user's preferences or the character's patterns that could be wrong. Examples: "User seems to prefer slow-burn scenes", "Ren tends to deflect emotional questions with humor", "The two have a growing rivalry".
-- "reflex": transient scene state that's only true RIGHT NOW. Examples: "Ren is holding a cup of tea", "They are in the bookshop", "It is raining", "Ren is annoyed".
+- "canon": durable facts the USER explicitly asserts (out of roleplay frame): "Remember that I grew up in Tokyo", "My cat's name is Kiku". Also: facts a CHARACTER establishes about themselves IN SCENE that the user would expect to persist as backstory — e.g. if Adira says "my grandmother stitched this guitar case" or Ren says "I learned to read from my mother", those land in canon.
+- "heuristic": (A) PREFERENCES, HABITS, AND PERSONAL HISTORY revealed in this exchange — what a character likes, dislikes, fears, owns, knows; what's happened to them; what they tend to do. Examples: "Adira loves sea-salt taffy from the harbor market", "Ren hums old shanties when nervous", "Adira lost her brother to the salt fevers three winters ago", "Alex prefers tea over coffee". (B) BEHAVIORAL PATTERNS observed in this exchange — even from a single scene if the pattern is clear: "Adira teases when she has the upper hand", "Ren deflects emotional questions with bookshop metaphors". Be GENEROUS with heuristic — it's reviewable in the inspector, the user can dismiss false positives. Empty heuristic on a substantive exchange is almost always wrong.
+- "reflex": only the EPHEMERAL PRESENT STATE of this specific scene. Examples: "Adira is sitting on the seawall", "It is winter solstice night", "Ren is holding a cup of tea right now". Brief sensory descriptions of THIS moment.
+
+IMPORTANT — intimate / erotic scenes are NOT exempt from heuristic extraction. The previous rule was "no erotic flourish in canon" — that rule still applies for canon (don't write "Alex loves X kink" into permanent canon from one scene) — but DO extract durable preferences and personal history revealed during intimate scenes into heuristic. Examples that SHOULD land in heuristic from an intimate scene: "Adira has wanted Alex since they first met in Port Llyr", "Alex responds to verbal challenges", "Adira likes to set the pace". Examples that should stay REFLEX: specific sensory descriptions of this moment ("her breath catches"), in-scene exclamations.
 
 RULES:
-- Never classify sarcasm, metaphor, erotic flourish, or in-fiction exaggeration as canon.
+- Third-person, character-named: "Adira lost her brother" not "she lost her brother". Use the character's name + the user's persona name if known.
 - Never invent facts not in the exchange.
-- If nothing fits a tier, return [].
-- Keep entries terse (under 140 chars each).
+- Aggressive on heuristic; conservative on canon.
+- If a tier truly has nothing, return [].
+- Keep entries terse (under 180 chars each).
 
 OUTPUT: {"canon":[...],"heuristic":[...],"reflex":[...]}`;
 

@@ -25,6 +25,11 @@ services:
     environment:
       YANTRIKDB_DB_PATH: /data/memory.db
       YANTRIKDB_API_KEY: ${YANTRIKDB_API_KEY:-}
+      # Force HF Hub's legacy download protocol — the newer xet chunked
+      # protocol can stall behind some Docker/Colima network configs on
+      # macOS, leaving the model fetch hung at 0 bytes. Adds 1-2s to the
+      # first download but is reliable. Removable once HF stabilizes xet.
+      HF_HUB_DISABLE_XET: "1"
     volumes:
       - chronicler-memory:/data
     expose:

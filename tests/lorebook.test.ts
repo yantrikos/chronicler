@@ -182,6 +182,99 @@ async function main(): Promise<void> {
     );
   }
 
+  // -----------------------------------------------------------------
+  // Multi-world: scanner unions character + world namespaces, dedupes
+  // by rid (no double activation if a character belongs to two worlds
+  // that both name the same key).
+  // -----------------------------------------------------------------
+  {
+    const transport2 = new InMemoryTransport();
+    const client2 = new YantrikClient(transport2);
+    const CHAR2 = "mw-char";
+    const WORLD_A = "world-a";
+    const WORLD_B = "world-b";
+
+    // Per-character entry
+    await client2.remember({
+      ...rememberAsCanon("Mara is the village blacksmith.", "seed", {
+        character_id: CHAR2,
+        lorebook_entry: {
+          keys: ["mara", "blacksmith"],
+          position: "after_char",
+          insertion_order: 50,
+          case_sensitive: false,
+          enabled: true,
+        } as LorebookEntryMeta,
+      }),
+      namespace: `lorebook:${CHAR2}`,
+    });
+    // World A entry — Salt Coast lore
+    await client2.remember({
+      ...rememberAsCanon("Salt Coast trade season runs Mar–Sep.", "seed", {
+        lorebook_entry: {
+          keys: ["salt coast", "trade season"],
+          position: "after_char",
+          insertion_order: 75,
+          case_sensitive: false,
+          enabled: true,
+        } as LorebookEntryMeta,
+      }),
+      namespace: `lorebook:${WORLD_A}`,
+    });
+    // World B entry — same key as world A on purpose, to verify dedup
+    await client2.remember({
+      ...rememberAsCanon("The northern caravans avoid the salt coast in winter.", "seed", {
+        lorebook_entry: {
+          keys: ["salt coast"],
+          position: "after_char",
+          insertion_order: 80,
+          case_sensitive: false,
+          enabled: true,
+        } as LorebookEntryMeta,
+      }),
+      namespace: `lorebook:${WORLD_B}`,
+    });
+
+    const activated = await scanLorebook(client2, {
+      character_id: CHAR2,
+      world_ids: [WORLD_A, WORLD_B],
+      recent_text: "mara, what's the salt coast trade season like?",
+    });
+
+    check(
+      activated.some((e) => e.content.includes("Mara is the village blacksmith")),
+      "multi-world: character's private entry surfaces"
+    );
+    check(
+      activated.some((e) => e.content.includes("trade season runs Mar")),
+      "multi-world: world A entry surfaces"
+    );
+    check(
+      activated.some((e) => e.content.includes("northern caravans avoid")),
+      "multi-world: world B entry surfaces"
+    );
+    // Verify dedup: even though salt coast key matches in both A and B,
+    // each entry should appear exactly once (they're distinct rids).
+    const saltCoastHits = activated.filter((e) =>
+      e.content.toLowerCase().includes("salt coast")
+    ).length;
+    check(
+      saltCoastHits === 2,
+      `multi-world: two distinct salt-coast entries deduped to 2 (got ${saltCoastHits})`
+    );
+
+    // Verify back-compat: legacy world_id (singular) still works alone.
+    const legacyActivated = await scanLorebook(client2, {
+      character_id: CHAR2,
+      world_id: WORLD_A,
+      recent_text: "salt coast",
+    });
+    check(
+      legacyActivated.some((e) => e.content.includes("trade season runs Mar")),
+      "back-compat: legacy world_id (singular) still pulls world entries"
+    );
+  }
+
   console.log("\n--- PASS: lorebook ---");
 }
 

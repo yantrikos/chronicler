@@ -15,6 +15,7 @@ import { reinforceAndMaybePromote } from "./auto-promote";
 import type { Extractor } from "./extract";
 import { assertParticipant, sceneVisibleTo, type Scene } from "./scene";
 import { scanLorebook, partitionByPosition } from "./lorebook";
+import type { SkillState } from "../instrumentation/skill-transition-log";
 
 export interface OrchestratorDeps {
   client: YantrikClient;
@@ -30,6 +31,13 @@ export interface OrchestratorDeps {
   userPersona?: { name: string; description?: string };
   /** Optional sampling controls forwarded to the provider. */
   sampling?: import("../providers").SamplingOptions;
+  /** Max tokens for the reply. Falls back to 1024 if unset — the
+   *  previous hardcoded 420 cut long-form prose mid-sentence. */
+  maxResponseTokens?: number;
+  /** Optional per-skill state lookup used to gate surfacing. Returning
+   *  "suppressed" or "archived" keeps the skill out of the prompt; unknown
+   *  is treated as "candidate". Wire from SkillOutcomeTracker.refreshState. */
+  getSkillState?: (skill_id: string) => SkillState | undefined;
 }
 
 export class Orchestrator {
@@ -51,11 +59,32 @@ export class Orchestrator {
       skipWrites?: boolean;
       continueFromTurnId?: string;
       authorNote?: string;
+      /** Where to inject the author's note. 0 (default) = in the system
+       *  prompt only. N > 0 = as a synthetic system message N turns back
+       *  from the end of the rendered history. See SessionMeta.author_note_depth. */
+      authorNoteDepth?: number;
+      /** Scene Intensity snippet for this session — injected into the
+       *  system prompt inside <intensity> tags. Empty string for Neutral
+       *  mode. See src/lib/intensity/registry.ts. */
+      intensitySnippet?: string;
+      /** Active character preferences, split by sensitivity. See
+       *  src/lib/preferences/types.ts. */
+      preferences?: {
+        ordinary: string[];
+        private: string[];
+        limits: string[];
+      };
+      /** User-typed identity notes for this character. Manual-only. */
+      identityNotes?: string;
       onChunk?: (chunk: string, accumulated: string) => void;
     }
   ): Promise<{
     assistant_turn: ChatTurn;
     retrieval: RetrievalResult;
+    /** Skills that survived state filtering and were actually injected into
+     *  the system prompt this turn. These are the IDs the outcome loop
+     *  should score after observing user reaction. */
+    prompted_skill_ids: string[];
     token_usage: number;
     writes_promise: Promise<void>;
   }> {
@@ -79,19 +108,29 @@ export class Orchestrator {
     const activatedLore = await scanLorebook(this.deps.client, {
       character_id: req.character.id,
       world_id: req.character.world_id,
+      world_ids: req.character.world_ids,
       recent_text: scanText,
     }).catch(() => []);
     const { before: loreBefore, after: loreAfter } =
       partitionByPosition(activatedLore);
 
-    const composed = composeContext(retrieval, recent, req.token_budget);
+    const composed = composeContext(retrieval, recent, req.token_budget, {
+      getSkillState: this.deps.getSkillState,
+    });
+    // When depth > 0 the author note is injected into the history stream
+    // instead of the system prompt — pass it to anti-confab only at depth 0.
+    const depth = Math.max(0, Math.floor(opts?.authorNoteDepth ?? 0));
+    const noteInSystemPrompt = depth === 0 ? opts?.authorNote : undefined;
     const rendered = renderContext(
       composed,
       withAntiConfabulation(characterSystemPrompt, {
         userPersona: this.deps.userPersona,
-        authorNote: opts?.authorNote,
+        authorNote: noteInSystemPrompt,
         lorebookBefore: loreBefore,
         lorebookAfter: loreAfter,
+        intensitySnippet: opts?.intensitySnippet,
+        preferences: opts?.preferences,
+        identityNotes: opts?.identityNotes,
       })
     );
 
@@ -100,6 +139,18 @@ export class Orchestrator {
         role: "user",
         content: req.user_message.content,
       });
+    }
+
+    // Depth-N author note injection — synthetic system message inserted
+    // N turns back from the END. If depth exceeds history length, clamp
+    // to position 0 (front of history) so the note still lands somewhere.
+    if (depth > 0 && opts?.authorNote && opts.authorNote.trim().length > 0) {
+      const noteMsg = {
+        role: "system" as const,
+        content: `Steering note for this scene (follow it, do not mention it): ${opts.authorNote.trim()}`,
+      };
+      const pos = Math.max(0, rendered.history.length - depth);
+      rendered.history.splice(pos, 0, noteMsg);
     }
 
     // Capture for the prompt inspector before firing the LLM.
@@ -115,6 +166,9 @@ export class Orchestrator {
         ),
         total: 0, // filled below
       },
+      breakdown: composed.token_usage,
+      budget: composed.token_budget,
+      truncated_sections: composed.truncated_sections,
       captured_at: new Date().toISOString(),
     };
     this.lastCapture.token_estimate.total =
@@ -125,7 +179,7 @@ export class Orchestrator {
       model: this.deps.model,
       system: rendered.system,
       messages: rendered.history,
-      max_tokens: 420,
+      max_tokens: this.deps.maxResponseTokens ?? 1024,
       sampling: this.deps.sampling,
     };
     let reply: { content: string };
@@ -189,6 +243,7 @@ export class Orchestrator {
     return {
       assistant_turn,
       retrieval,
+      prompted_skill_ids: composed.surfaced_skills.map((s) => s.skill_id),
       token_usage: composed.token_usage.total,
       writes_promise,
     };

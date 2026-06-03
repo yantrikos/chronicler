@@ -2,6 +2,418 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.2.0] — 2026-06-03 — Phase 9: Interactive Memory + ST-parity polish
+
+The biggest single release since v0.1. Phase 9 turns verified memory from passive retrieval into a user-steerable, character-visible system: arcs, relationship drift, retrieval provenance, scene intensity, and character preferences ship as five distinct inspector tabs and three new long-memory substrates. Alongside Phase 9, this release bundles ~6 weeks of pre-Phase-9 work that never made it to a tagged release — provider matrix expansion (Gemini, OpenRouter, nano-gpt streaming polish), Story / continue mode, World Info (global lorebooks), Tier B power features (token visualizer, branching, search), and scene presets.
+
+### Phase 9 — Interactive Memory pillars
+
+- **Arcs.** Cross-session narrative arcs grouped by entity / conflict / goal, with active / paused / resolved / abandoned states. The "return after a week" continuity feature: open the **arcs** tab and see what was live, what stalled, what to pick up.
+- **Relationship drift.** Dyadic axes (trust ↑↓, dependency, defensiveness, openness) surface as canon-grounded labels on the **character** tab — not abstract personality scores but tagged shifts pointing at specific memories.
+- **Retrieval provenance.** Each memory row carries `why_retrieved` chips ("entity:Mara", "tier:canon", "query_match:0.84") in the **memory** tab. The prompt inspector now shows the exact reason every memory was surfaced this turn.
+- **Scene Intensity.** Session-level dropdown — Neutral / Fade to Black / Tasteful / Explicit — that injects an editable `<intensity>` snippet into the system prompt. First-class control, not a jailbreak. Explicit mode is uncensored by design; output filtering remains permanently off the table.
+- **Character Preferences.** New `preferences:<character_id>` substrate with a 3-axis schema (interpretation_level × sensitivity × state machine) and brake mechanics against self-reinforcement. New **prefs** tab with Limits / Private / Preferences sections, identity notes, and per-character settings. Verifier-gated: nothing reaches the prompt unless you say "yes, that's her." Limits always require one-click confirmation (safety floor). 23 verifier tests cover identity-label rejection, regex final-guard, sensitivity-class invariants, brake mechanics, and dedup.
+
+### Pre-Phase 9 — bundled work
+
+- **Provider matrix.** Native Gemini provider, OpenRouter, nano-gpt; streaming polish across all providers; reasoning-field fallback (deepseek-r1, gpt-5 thinking) so verifier subsystems work even when models emit JSON via `message.reasoning` instead of `message.content`.
+- **Story / continue mode.** Long-form narrative mode that maintains paragraph cohesion across turns.
+- **World Info.** Global lorebooks attached at world scope, not just per-character. Position-aware (before_char / after_char) injection.
+- **Tier B power features.** Per-turn token visualizer showing the actual budget breakdown; chat branching (alt timelines on any turn); chat-wide regex search.
+- **Scene presets.** Sampling preset library (Slow Burn / High Heat / Companion / Storyteller) with per-character pinning.
+- **Verified character learning v2.** Skill substrate (procedure / pattern / rule / lesson / reference) with verifier-gated define + outcome loop reinforcement + state machine (candidate → active → suppressed → archived).
+
+### Compared to the field
+
+- New [docs/COMPARISON.md](docs/COMPARISON.md) — head-to-head capability matrix against SillyTavern, RisuAI, and AgnAistic. README gets the headline 8-row summary.
+
+### Test suite
+
+12 test files, all green: three-day-continuity, auto-promote, extract, secret-stays-private, session-replay, lorebook, skill-former, skill-outcomes, lcdb-v0, slash, arcs, relationship-drift, preference-former.
+
+### Notes
+
+This release collapses what was internally tracked as 0.2.0 → 0.4.0 milestone bumps into a single tagged version. Internal milestone notes preserved below for anyone who wants the day-by-day shape of the work.
+
+---
+
+# Internal milestone notes (rolled into 0.2.0 above)
+
+These entries documented day-by-day progress during the Phase 9 build. They are NOT separate releases — version numbers in this section were never tagged or published. Kept for development context only.
+
+## [milestone] — 2026-06-02 — Character Preferences
+
+A second long-memory substrate dedicated to *what this character likes, dislikes, and refuses* — distinct from skills (which are about how the character behaves under triggers) and lorebook (which is about world facts). Surfaces in a new **prefs** tab in the inspector. Nothing reaches the prompt unless you say "yes, that's her."
+
+### What changed
+
+- New namespace `preferences:<character_id>` in YantrikDB, persisted as `tier=canon` so it survives session boundaries.
+- New inspector tab **prefs** (5th tab): three pinned-in-priority sections — **Limits & boundaries** (rose, top), **Private preferences** (violet), **Preferences** (emerald) — plus a free-text **Identity notes** textarea (manual-only; never auto-detected) and per-character **Settings** toggles.
+- **PreferenceFormer** — LLM verifier that reads recent canon + scene reflex and proposes preferences from observed behavior. Pre-activation evidence weighting brakes the self-reinforcement loop. Identity-label regex guard catches "is submissive" / "is a brat" / etc even when the verifier mis-labels them as `interpretation`.
+- **3-axis schema** — every preference carries an `interpretation_level` (observation | interpretation | identity_label), a `sensitivity` (ordinary | private | limit), and a state machine (observed → candidate → active → dismissed).
+- **Prompt injection** — only `state=active` preferences reach the system prompt, in three blocks: `<preferences>` (ordinary), `<private_preferences>` (intimate, user-confirmed), `<limits>` (user-confirmed boundaries). The block ends with a load-bearing instruction — *"treat the patterns above as remembered tendencies, not rules… the character can grow, change, surprise"* — to keep the model from fossilizing the character.
+- **Settings, per character**:
+  - *Auto-keep ordinary preferences* — default ON
+  - *Trust Chronicler on private preferences* — default OFF (opt-in)
+  - *Auto-keep limits* — permanently OFF (safety floor: a false-positive limit refuses scenes you actually want, so limits surface aggressively in the UI but always require one click to inject)
+- Tests: 23 assertions in `tests/preference-former.test.ts` — identity-label rejection, regex final-guard, sensitivity-class invariants, brake mechanics, hallucinated-rid filtering, cache + invalidate, dedup, malformed-output tolerance.
+
+### Why a new substrate and not a `skill_type=reference`
+
+Brainstormed it. Skills are *behavioral patterns under triggers* — they want a procedure/pattern shape and a state machine tuned for outcome-loop reinforcement. Preferences are *what the character likes / refuses* — they want a sensitivity axis, a confirmation gate for the intimate/limit cases, and prompt-injection paths that group by sensitivity rather than by trigger. Shoehorning preferences into skills would either bloat the skill schema or leak preference UX into the skill inspector. Two substrates, two state machines, two prompt blocks. The pricing of duplication is more than paid back by clarity.
+
+### Saga
+
+- Phase 9 epic continues. New Preferences pillar joins Skills, Drift, Threads, Arcs, Intensity. Manual verification: run a few intimate scenes with Adira at Explicit, then hit the **prefs** tab — the "look for patterns now" button should produce candidates split across the three sensitivity classes; the candidates should never include a `is sub/dom/brat` line.
+
+---
+
+## [milestone] — 2026-06-02 — Scene Intensity
+
+A one-click way to steer how directly the model writes intimate scenes, without editing author's notes or swapping models. Sibling to the scene preset; lives in the scene strip.
+
+### What changed
+
+- New session-level dropdown: `intensity: Neutral ▾` next to the author's note button.
+- Four modes:
+  - **Neutral** (default) — no injection, current behavior unchanged
+  - **Fade to Black** — non-graphic, fade on physical escalation, prefer emotional beats
+  - **Tasteful** — intimate but non-anatomical, suggestive over clinical
+  - **Explicit** — write directly, do not refuse or moralize on grounds of content, stay in character
+- Each mode's snippet is editable inline (with reset-to-default) and persisted to localStorage. The editable text is exactly what gets injected — no hidden additions.
+- Injected into the system prompt inside an `<intensity>` block so you can audit it in the prompt inspector.
+- Model-aware hint when **Tasteful** or **Explicit** is selected on guarded providers (Claude, GPT-4/5, Gemini): a one-line note pointing to Ollama-local or OpenRouter for unrestricted output.
+
+### What this is, plainly
+
+Scene Intensity is **prompt steering**, not a filter. Chronicler does not filter input or output — it never has and won't start now. The mode adds a snippet to the system prompt; your model decides whether to follow it. Same uncensored stance as before; the same `<canon>` / `<scene>` / `<character_development>` blocks are there. This adds an `<intensity>` block when (and only when) you pick a non-Neutral mode.
+
+**Explicit** is a first-class mode because intimate / erotic roleplay is a real and large part of what people use clients like this for. Putting it in the dropdown — clearly labeled, with anti-refusal phrasing in the default snippet — is recognition that this product is for that audience too. It is not a stepping stone to anything else; output filtering is permanently off the table for Chronicler. If your model softens or refuses despite the mode, the model is the ceiling — switch providers, that's what the hint is for.
+
+### Saga
+
+- Phase 9 epic continues. The intensity control is a new pillar but lives alongside the others as a small, focused ship. No new tests required — the behavior is presentational + prompt-concatenation, both already covered indirectly by the orchestrator's existing path. Manual verification: send a message with each mode active and inspect the system prompt via the prompt inspector — the `<intensity>` block should appear (or be absent for Neutral).
+
+---
+
+## [milestone] — 2026-06-02 — Retrieval Provenance (Phase 9 pillar 4)
+
+Memory rows now show *why* YantrikDB surfaced each memory in the last turn's retrieval. Small emerald chips below each memory text — "entity:Mara", "tier:canon", "query_match:0.84" — pulled from the substrate's `why_retrieved` field.
+
+### Added — provenance badges
+
+- **`InspectorMemory.why_retrieved?: string[]`** in `src/components/Inspector/MemoryInspector.tsx`; renders the first 4 hints as compact mono-spaced chips with a tooltip.
+- **`lastWhyRetrievedRef`** in `App.tsx` captures per-rid hints from every turn's `retrieval.canon / scene / heuristic / graph` results. `refreshMemories()` reads from the map when building the view; entries persist across turns until character/session switch.
+
+### Why only the last-recalled memories
+
+`refreshMemories()` uses `listMemoriesInNamespace` (a list operation, no hints) by default. Recall results (per-turn queries) are the only path that produces `why_retrieved`. The map persists across turns so memories that surfaced 3 turns ago still show their badges. Always-recalling on every inspector refresh would be wasteful; backfilling from saved turn history is a bigger lift — both deferred.
+
+### Saga
+
+- Task #51 closed. **Phase 9 epic now 4 of 5 pillars done** (Open Threads + Arcs + Relationship Drift + Retrieval Provenance). Only Deferred Follow-Through remains — informally already half-shipped via Open Threads + the existing `<scene_hooks>` injection; only "explicit follow-up candidate generation" would be net new, and the brainstorm conclusion was to wait for real usage to demand that before building.
+
+---
+
+## [milestone] — 2026-06-02 — Relationship Drift (Phase 9 pillar 3)
+
+Characters notice when their relationship to you has shifted. Trust, defensiveness, openness, dependency — up or down — surfaced as canon-grounded patterns in the Character Development tab.
+
+### Added — DriftFormer
+
+- **`src/lib/orchestrator/relationship-drift.ts`** — same architectural template as `SkillFormer`: cheap input (recent canon memories for the dyad) → LLM verifier biased to reject → write to YantrikDB skill substrate.
+- **Four axes only**: `trust`, `defensiveness`, `openness`, `dependency`. Two directions: `up`, `down`. Deliberately constrained — the UI doesn't become a personality test.
+- **Stacked biases** in the verifier: default to `is_drift: false` on uncertainty, require ≥2 distinct canon memories of evidence, reject if the character card already describes the trait as baseline (not a shift if it's who they always were).
+- **Evidence rid sanitization** — drops hallucinated rids the verifier sometimes invents.
+- **Per-(character, target) cache** keeps LLM cost bounded; `invalidate()` hook for explicit re-verification.
+
+### Where drift signals live
+
+- Written as `skill_type="pattern"` with `applies_to=[character, target, axis, "direction_<dir>"]`. Skill id pattern: `<char>.drift.<target>_<axis>_<direction>`.
+- Render in the existing **Character Development tab** alongside skills — the `applies_to` chips self-document the dyad ("ren / user / trust / direction_up"). Same approve / disable / archive controls already work.
+- Surfaced into the system prompt via the existing skill compose path; no new prompt scaffolding.
+
+### Refresh cadence
+
+- Runs once per (character roster, session) change. Pulls top 20 canon per character; submits one candidate per character with target=user (multi-character matrix is v2). Cache prevents re-verification mid-session; users get fresh signals on session resume.
+
+### Verification
+
+- **`tests/relationship-drift.test.ts`** — 17 assertions: accept path with substrate write + applies_to shape, reject paths (no_drift verdict, <2 input memories, <2 evidence_rids, low confidence, malformed JSON), cache behavior (3 passes → 1 verifier call), invalidate() forces re-verify, hallucinated rid filtering.
+
+### Saga
+
+- Task #50 closed. Phase 9 epic now **3 of 5 pillars done** (Open Threads + Arcs + Relationship Drift). Remaining: 9.4 Retrieval provenance (polish-tier), Deferred Follow-Through (informally half-shipped via Open Threads + `<scene_hooks>` injection).
+
+---
+
+## [milestone] — 2026-06-02 — Arcs (Phase 9 pillar 2)
+
+The "return after a week" continuity feature. Canon memories cluster into cross-session narrative arcs with active/paused/abandoned/resolved status. The recap banner surfaces active arcs so resuming a chat lands you oriented.
+
+### Added — Arc clustering
+
+- **`src/lib/arcs/cluster.ts`** — rule-based clusterer: groups canon by linked entity (preferring `metadata.entities`, falling back to capitalized-word frequency extraction). Status derives from `last_touched_at` per arc: <24h = active, <14d = paused, ≥14d = abandoned. Entity denylist drops generic noise (`user`, `scene`, `narrator`).
+- **`src/lib/arcs/types.ts`** — `Arc { id, title, primary_entity, entities, members, last_touched_at, status }` with `ArcMember { rid, text, importance, touched_at }`.
+- **`src/lib/arcs/overrides.ts`** — localStorage `ArcOverride { status: "resolved"|"archived"|"pinned" }`; same pattern as thread overrides.
+
+### Added — Arcs tab
+
+- **Fourth inspector tab `arcs · N`** alongside memory / character / threads. Status-colored cards (active emerald, paused amber, abandoned rose, resolved neutral), filter chips (All / Active / Paused / Abandoned / Archived). Each card: title, status badge, override badge, member count, most-recent member snippet (click rid → jump to Memory tab). Per-row actions: pin, resolve, archive, reset. Pinned arcs always float to the top.
+
+### Added — Recap integration
+
+- **`summarizeActiveArcs(arcs, cap=5)`** — deterministic rule-based one-line summary of active + paused arcs. Renders in the chat's recap banner below the LLM-generated "Previously on…" text. Stays OUT of any LLM prompt — the recap generator is the most hallucination-prone surface (see ADR notes); keeping the arcs line outside that path preserves the anti-confabulation guarantee.
+
+### Verification
+
+- **`tests/arcs.test.ts`** — 24 assertions: status derivation across thresholds, multi-entity clustering, member sort, entity denylist, fallback text extraction, summary line behavior, overall sort order (active → paused → abandoned).
+
+### Saga
+
+- Task #49 closed. Phase 9 epic now 2 of 5 pillars done (Open Threads + Arcs). Next sequenced: 9.3 Relationship drift signals (dyadic successor to retired #24).
+
+---
+
+## [milestone] — 2026-06-02 — Phase 9: Interactive Memory
+
+Phase 4 (post-MVP cognition, scoped in April) was largely completed via displacement by Phase 6/7/8 work. This release closes out Phase 4 honestly — retiring items absorbed by Skills + World Info, splitting items that became background polish — and opens **Phase 9: Interactive Memory** with the first pillar shipped.
+
+The positioning shift: memory moves from passive retrieval to **user-steerable and character-visible**. The Threads tab is the screenshot — "you promised X 3 sessions ago, never followed up — source memory `mem-1234` — last seen 4d ago." No other client can show that.
+
+### Added — Open Threads Inspector (Phase 9 pillar 1)
+
+- **Third inspector tab `threads · N`** alongside memory + character. Surfaces YantrikDB's temporal continuity (`temporal.upcoming` + `temporal.stale`) which was previously either invisible in the system prompt (`<scene_hooks>`) or outright discarded.
+- **Two kinds of rows**: *scene hooks* (upcoming events with approaching beats — sky chip) and *stale* (important canon untouched for 14+ days — rose chip). Header shows a `N stale` warning when any are present.
+- **Per-row provenance**: source memory rid (click to jump to Memory tab), last-seen short-date, linked entity chips. The "see what's happening" brand applied to temporal memory.
+- **Per-row actions**: **pin** (keep visible until resolved), **resolve** (mark done), **snooze 24h / 7d** (re-surfaces automatically when the window expires), **dismiss** (permanent hide), **reset** (undo override). Overrides persist via `localStorage`; the underlying memories are never mutated.
+- **Filter chips**: All / Open / Stale / Hidden — the Hidden tab lists overrides with a restore button so nothing is lost.
+- **Sort order**: pinned → stale → upcoming → importance descending.
+
+### Added — supporting plumbing
+
+- `src/lib/threads/types.ts` — `Thread` interface (id, kind, text, rid, importance, last_seen_at, entities).
+- `src/lib/threads/dismissals.ts` — localStorage override store with `isHidden()` helper that respects snooze-until.
+- `src/lib/yantrikdb/client.ts` — new `listThreads(namespace, kind, {days, limit})` method: calls `temporal` MCP, parses memory list, extracts entities, generates stable ids (rid when available, ascii-folded text-slug fallback so dismissals survive reload).
+- `src/components/Inspector/ThreadsInspector.tsx` (new).
+- `App.tsx` — `refreshThreads()` fans out per-character; `threadOverridesRef` + version state drive a `useMemo` for `visibleThreads`; refresh fires on character/session switch alongside refreshMemories/refreshSkills.
+
+### Saga reorganization
+
+- **Phase 4 closed.** #24 (personality inference) retired — absorbed by Phase 8 Verified Character Learning. #25 (semantic lorebook) retired — delivered by Phase 6 World Info. #26 (temporal triggers) rescoped + shipped as Open Threads Inspector. #27 (consolidation polish) split — recap done, cadence ongoing non-roadmap, arc summaries moved to Phase 9.
+- **Phase 9 epic created** ("Interactive Memory / Living Continuity"):
+  - 9.1 Open Threads Inspector — DONE
+  - 9.2 Cross-session arc summaries — NEXT (cluster canon by entity + time, surface active/paused/resolved/abandoned status)
+  - 9.3 Relationship drift signals — dyadic successor to retired #24 (canon-grounded trust/defensiveness/openness deltas, surfaced in Character tab alongside skills)
+  - 9.4 Retrieval provenance — per-memory "why was this recalled" badges
+
+### Explicit scope cuts
+
+- **No anniversary callbacks.** Model can do anniversaries from timestamps on canon memories when surfaced; no separate detector needed.
+- **No autonomous follow-up generator.** Surfacing alone improves model behavior in scene.
+- **No graph traversal for retrieval.** Recharacterized as background tuning, not a headline feature.
+- **No agent integration / multi-user / plugins / mobile** for Phase 9. Pre-traction, the job is to make the core uniquely compelling, not expand surface area.
+
+---
+
+## [milestone] — 2026-06-01 — Provider matrix + Gemini
+
+Adding a provider becomes a dropdown. Twelve common providers pre-filled. Gemini gets a native adapter.
+
+### Added — provider templates
+
+- **`src/lib/providers/templates.ts`** — twelve `PROVIDER_TEMPLATES`: Ollama, OpenAI, Anthropic, Google Gemini (native), Mistral, OpenRouter, Together AI, Groq, KoboldCpp/KoboldAI, llama.cpp server, vLLM, and "Other (OpenAI-compatible)" as a custom catch-all. Each template carries a sensible base URL + model default; the user just adds an API key.
+- **Settings: "+ add provider…"** dropdown replaces the three hardcoded +Ollama/+OpenAI-compat/+Anthropic buttons. Pick from the menu, get a pre-configured entry.
+
+### Added — Gemini native adapter
+
+- **`GeminiProvider`** in `src/lib/providers/index.ts`. Handles Gemini's unique wire format: `contents[]` with `parts[]`, `systemInstruction` as a top-level field, `generationConfig` for sampling, API key in query string. Maps assistant↔model role. Streaming via `/streamGenerateContent?alt=sse`.
+- `ProviderConfigEntry.kind` extended with `"gemini"`. `buildProvider` in `App.tsx` routes accordingly.
+
+### Out of scope
+
+- **Horde** — async job-based (submit → poll community workers); genuinely different model from the sync request/stream pattern. Real demand exists but it's a sizeable adapter; deferred to user request.
+- Per-preset Gemini-specific family deltas (`presets.ts` currently treats Gemini as the OpenAI-compat fallback) — small follow-up if telemetry shows defaults need tuning.
+
+### Saga
+
+- Task #39 closed. Phase 7 (Power-user polish) epic now **5 of 5 done**. Phase 6 (Tier B power differentiators) also 4/4. Both post-launch epics complete.
+
+---
+
+## [milestone] — 2026-06-01 — Story / continue mode
+
+Freeform narrative RP now has a dedicated entry point — no fixed character, narrator-style prose, the rest of the stack unchanged.
+
+### Added — story mode
+
+- **`+ new story`** button in the Library header. Prompts for an optional title and spins up a session with a synthesized "story character" (narrator system prompt + `story` tag).
+- **`src/lib/story/factory.ts`** — `buildStoryCharacter({ title?, scenario?, world_ids? })` returns a `Character` with a third-person narrator system prompt: advances the scene from the user's actions, lets NPCs speak in dialogue, doesn't break to ask meta questions, honors canon / scene / lorebook as world facts.
+- **Visual marker** — story characters render with a small violet `story` chip in the library grid so they're distinguishable from imported cards.
+
+### Design
+
+- Implemented as a regular Character (not a parallel session type). The entire chat loop, write contract, memory tiers, lorebook scanner with assigned worlds, recap, and the inspector tabs all key off Character — synthesizing keeps the diff tiny while still giving users a distinct entry point and a visual marker. Story characters are editable in the regular Character editor (so users can refine the narrator prompt or assign worlds).
+
+### Saga
+
+- Task #41 closed. Phase 7 (Power-user polish) epic now 4 of 5 done.
+
+---
+
+## [milestone] — 2026-06-01 — World Info (global lorebooks)
+
+Lorebooks are no longer per-character only. Worlds are a first-class entity; multiple characters opt in to a world and share its lorebook entries.
+
+### Added — World Info
+
+- **World entity** (`src/lib/worlds/store.ts`) — id, name, optional description, persisted to localStorage parallel to characters and sessions.
+- **`Character.world_ids?: string[]`** — characters belong to zero or more worlds. Legacy `world_id?: string` field kept; `listCharacters()` migrates on read by projecting `world_id` into `world_ids` so downstream consumers see the multi shape.
+- **Lorebook scanner** unions namespaces (`lorebook:<character_id>` + every `lorebook:<world_id>` the character is in). Per-rid dedup catches the same entry being recalled twice.
+- **Canon recall pipeline** fans out one recall per world; merged + deduped by rid alongside the character's own canon.
+- **Worlds CRUD** lives in the Library above the character grid. Each card shows name, description, member-count chip, and three actions: edit lorebook, rename, delete. Delete cascades — every member character's `world_ids` array gets the deleted world id stripped, no dangling refs.
+- **Character editor** gains a Worlds field — pill toggles for each defined world (hidden entirely when no worlds exist so the editor stays clean for users who don't care).
+- **LorebookEditor reused** for world lorebooks — the YantrikDB namespace pattern (`lorebook:<id>`) is identical for both character and world targets; only the header label differs.
+
+### Verification
+
+- `tests/lorebook.test.ts` gains 5 multi-world assertions: per-character entries still surface, world entries from both A and B surface, distinct entries with the same key correctly dedupe to 2 not 4, legacy singular `world_id` still works.
+
+### Saga
+
+- Task #35 closed. Phase 6 (Tier B power differentiators) epic complete — all 4 of 4 done.
+
+---
+
+## [milestone] — 2026-06-01 — Tier B power features
+
+Three Phase 6 power-user features land: configurable author's-note depth, multi-persona library with per-session quick-swap, and a three-step first-run wizard for new users.
+
+### Added — author's note depth
+
+- **Depth slider 0-5** under the author's note textarea. Depth 0 keeps the current behavior (note lives in the system prompt — broad steering). Depth N>0 omits the note from the system prompt and instead splices it into the message history as a synthetic system message N turns before the reply, where the model attends to it more strongly.
+- Persisted per-session via `SessionMeta.author_note_depth`.
+- `renderContext` return type widened to include `role: "system"` in history so the depth-N injection lands cleanly.
+
+### Added — multi-persona
+
+- **Persona library** (`ChroniclerConfig.user_personas`) with stable ids + `active_persona_id`. Single-persona configs migrate automatically.
+- **Settings CRUD** — `PersonasSection` replaces the single-persona block. Add, rename, edit description, delete (gated when only one remains), radio for the default.
+- **Per-session override** stored in `SessionMeta.persona_id`. Switching mid-session updates the system prompt's `<user>` block on the next turn.
+- **Quick-swap dropdown** in the scene strip (`as <name>`) when ≥2 personas exist.
+- `currentPersona()` helper used by recap, impersonate, and the header subtitle. New `activePersona(cfg)` helper for read paths.
+- Personas live in config only — never round-tripped through character cards, preserving the user-controlled stack.
+
+### Added — first-run wizard
+
+- **Three-step modal** (`src/components/Onboarding/FirstRunWizard.tsx`) triggered exactly once per machine (`chronicler.onboarding_v1_dismissed` flag, versioned for future upgrade flows).
+  - **Step 1 — Provider**: Ollama (local) / OpenAI / Anthropic / Skip. Smart URL + model defaults per choice; inline API key field where needed.
+  - **Step 2 — Persona**: name + description, both optional.
+  - **Step 3 — Character**: file picker for v2/v3 card import OR try-demo for Ren.
+- Every step skippable; "skip the rest" header button dismisses immediately. Progress dots in footer.
+- Patches apply per-step so partial completion still saves what the user provided.
+- Detection (`shouldShowWizard`) checks: no real provider beyond mock + no named persona + no characters imported.
+
+### Saga
+
+- Tasks #34 (multi-persona), #36 (first-run wizard), #37 (author's note depth) closed. Phase 6 epic now 3 of 4 done.
+
+---
+
+## [milestone] — 2026-06-01 — Token visualizer + TTRPG floor
+
+Two power-user features that don't require any new infrastructure.
+
+### Added — token budget visualizer
+
+- **Stacked retrieval budget bar** in the prompt inspector: canon / scene / drafts / graph segments coloured to match the tier palette, headroom in muted slate, hover-tooltips on every segment showing token count + budget %.
+- **Truncation warnings**: any composer section that hit its allocation cap and dropped items shows a `⚠` glyph in its legend entry; the bar header shows aggregate "⚠ N truncated" so users can see when context was lost without opening every section.
+- Backing: `ComposedContext.truncated_sections` plus a `dropped` counter from the fit-to-budget loop. `PromptCapture` now carries `breakdown`, `budget`, and `truncated_sections` for the visualizer to consume.
+
+### Added — TTRPG slash commands
+
+- **`/dice 2d6`, `/roll 1d20+5`, `/r`** — full dice grammar (+/- terms, mixed dice expressions, keep-highest `4d6kh3` for D&D ability scores, keep-lowest `4d6kl3` for disadvantage). Sanity caps prevent `1000d1000` accidents. Results render as a `role: "system"` "narrator" turn — the character sees the roll in scene history on the next turn and can react to it naturally.
+- **`/init`** — rolls 1d20 per scene participant, outputs a sorted initiative list.
+- **`/help`** (`/?`) — lists all commands inline.
+- **Narrator turn rendering** — centered italic row, no avatar, no swipe/regen affordances, hover-to-delete. Stored persistently like any other turn.
+- Unknown slash commands fall through to the LLM (matches SillyTavern-style behavior where some commands are RP shorthand).
+
+### Verification
+
+- **`tests/slash.test.ts`** — 40 assertions covering parser branches, dice expression evaluation (including malformed input rejection), keep-highest/keep-lowest, deterministic seed verification, every `executeSlash` kind.
+- Saga tasks #38 (token visualizer) and a new TTRPG-commands task closed.
+
+---
+
+## [milestone] — 2026-06-01 — Scene presets + header cleanup
+
+Sampling controls become discoverable. Replace a single anonymous slider panel that nobody knew how to tune with six **scene-coded presets** users actually pick by intent. Header is cleaner; the "+N skills" badge is now an entry-point.
+
+### Added — scene presets
+
+- **6 sampling presets** (`src/lib/sampling/presets.ts`): **Slow Burn** (default, grounded dialogue), **High Heat** (vivid, expressive), **Companion** (warm, supportive), **Storyteller** (long-form prose), **Game Master** (structured adventure), **Canon Keeper** (lore-respecting). Names converged from a multi-model brainstorm (gpt-5.4 + deepseek + claude) — generic SaaS labels rejected.
+- **Model-family overrides** invisible to the user. Mistral/Llama get base values; Qwen reduces repetition penalty; Anthropic drops `min_p` + `repetition_penalty` entirely and cools temperature; DeepSeek widens `top_k`. Implemented as deltas on top of the base preset.
+- **Header dropdown** (`src/components/Settings/PresetPicker.tsx`) with subtitle hints, active-preset highlight, and an Anthropic-aware "3/5" subscript when the provider strips fields.
+- **Custom-state detection**: any slider wiggle in Settings flips the pill to "Custom (was: X)" with one-click reapply inside the dropdown menu.
+- **Session-scoped preset** persisted in `SessionMeta.preset_id` so opening an old chat restores its mood. App-level `default_preset_id` in `ChroniclerConfig` for new sessions.
+- **Provider-switch toast** when picking a preset on a provider that doesn't support every field: "*High Heat adjusted for Anthropic — 3 of 5 controls apply*".
+
+### Changed — header UX
+
+- Removed redundant "demo: Ren" button (the EmptyState splash already has the demo entry).
+- "+ Mei (try group)" moved from header into the scene strip where scene participants live, restyled as a quiet emerald pill.
+- "[backend · provider]" pill removed from header (info now lives in the Settings button tooltip).
+- "+N skills" header badge is now a button that jumps to the Character Development tab.
+- Visual divider added between PresetPicker and utility buttons.
+
+### Scope decisions (and what stayed out)
+
+- Sampling only. `disable_thinking`, max_tokens, retrieval budgets, lorebook depth, prompt scaffolding — all stay on their existing surfaces. Bundling them would make "High Heat" silently change retrieval, violating the predictability promise.
+- Per-character preset binding deferred to v0.3 — the substrate-driven Character Development already gives per-character feel, and per-character sampling risks silent stranger-baked-in choices if we ever import from card JSON.
+- Saga task #40 closed.
+
+---
+
+## [milestone] — 2026-06-01 — Verified character learning
+
+The skill loop. Patterns the model shows repeatedly are distilled into
+typed catalog entries, verified by an LLM that defaults to rejection,
+surfaced back into future prompts when relevant, and tuned by outcome
+scoring. The whole loop is covered by a CI-enforced ablation harness.
+
+### Added — verified character learning
+
+- **YantrikDB skill substrate integration** (`src/lib/orchestrator/skill-former.ts`). Cheap pattern/lesson/unresolved/contradiction triggers from `think()` go through an LLM verifier that returns strict JSON `{is_skill, skill_type, applies_to, body, confidence, why}`. Verifier prompt explicitly biases toward rejection on uncertainty; model stylistic tics, broad applies_to, and degenerate shapes get a final-guard pass too. Confirmed skills written via `client.skillDefine` with state=candidate. Cache by trigger_id so re-entry is free.
+- **Outcome scoring + state machine** (`src/lib/orchestrator/skill-outcomes.ts`). `+1` if no regen / retcon / delete in the observation window, `-1` otherwise, `0` if the window hasn't closed yet. State derives from accumulated outcomes (read from substrate, not stored on the skill): candidate → active at net ≥+3 across ≥2 distinct sessions; active → suppressed at last-5 net ≤-2; suppressed → archived after 7 idle days. Sessions are recoverable from outcome notes (encoded JSON header). Process-local dedup guard prevents (skill, session, turn) tuples from being scored twice.
+- **Skill surfacing in the per-turn pipeline.** `client.skillSurface(query, {applies_to: [character_id]})` joins the parallel retrieval call. Compose filters suppressed/archived skills (overrides win over derived state) and renders the surviving top-N as a `<character_development>` block in the system prompt, framed as habitual patterns rather than instructions. Default relevance cutoff `0.15` so off-topic skills don't fossilize.
+- **Per-turn outcome wiring.** `onSend` scores the prior assistant turn positively; `onRegenerate` scores the target turn negatively *before* the new turn runs so suppression takes effect immediately; `onEditMessage` and `onDeleteMessage` on assistant turns score retcon and delete negatives respectively.
+- **Character development inspector tab** (`src/components/Inspector/SkillInspector.tsx`). 4th tab alongside Memory. State-coloured cards (active emerald / candidate amber / suppressed slate / archived neutral), skill_type badges, applies_to tags, uses + success rate, per-row approve / disable / archive / reset controls. Overrides persist via localStorage and win over the derived state used by surfacing.
+- **Header `+N skills` badge.** Amber count of newly-formed skills this session for observable proof the loop is firing.
+
+### Added — instrumentation
+
+- **Skill transition log** (`src/lib/instrumentation/skill-transition-log.ts`) — sibling of the memory promotion log with matching redaction posture (text/body redacted unless verbose env is on). Keeps memory and skill telemetry as separate contracts.
+
+### Added — verification
+
+- **`tests/skill-former.test.ts`** — 19 assertions covering verifier-no, verifier-yes, model-tic-rejected, broad-applies-to-rejected, cache hit, malformed JSON tolerated.
+- **`tests/skill-outcomes.test.ts`** — 23 assertions covering all four scoring branches, candidate→active threshold (requires 2 distinct sessions), active→suppressed via negative streak, suppressed→archived idle, process-local dedup.
+- **`tests/lcdb-v0.test.ts`** — Local Character Development Benchmark v0. 3 scenarios × 2 conditions (skills_on / skills_off), 24 hard assertions over 72 binary signals: reuse, restraint, model uptake, inspector faithfulness, outcome calibration. `OracleSurfaceTransport` approximates a perfect ranker so the test measures the surfacing-pipeline contract independent of the in-memory transport's substring scoring. CI-enforced.
+
+### Added — docs
+
+- **[docs/LCDB-v0.md](docs/LCDB-v0.md)** — benchmark methodology, what it tests vs explicitly doesn't, reproduction steps, latest results pointer.
+- **docs/LCDB-v0-results.{json,md}** — auto-generated per CI run.
+- **[docs/PATTERN.md](docs/PATTERN.md)** — new "Skills: the learning loop" section documenting the YantrikDB-narrows / LLM-verifies / outcomes-drive-state template, generalizable beyond Chronicler (anomaly triage, code review, support summarization).
+- **README.md** — added "Verified character learning" bullet under "What makes it different" with link to LCDB-v0.md.
+
+### Changed
+
+- **`InMemoryTransport`** gains `skill` define/surface/outcome/get/list support so the dogfood loop works in mock mode and tests have a real substrate to write against.
+- **`YantrikClient`** gains `skillDefine` / `skillSurface` / `skillOutcome` / `skillGet` / `skillList` wrappers.
+
+---
+
 ## [0.1.0] — 2026-04-17 — First public release
 
 Initial release. Everything below was shipped together over the initial build sprint.

@@ -2,8 +2,10 @@ import { useState } from "react";
 import {
   type ChroniclerConfig,
   type ProviderConfigEntry,
+  type UserPersona,
   saveConfig,
 } from "../../lib/config";
+import { PROVIDER_TEMPLATES } from "../../lib/providers/templates";
 
 interface Props {
   config: ChroniclerConfig;
@@ -41,37 +43,15 @@ export function SettingsPanel({
     });
   }
 
-  function addProvider(kind: ProviderConfigEntry["kind"]) {
-    const id = `${kind}-${Math.random().toString(36).slice(2, 6)}`;
-    const entry: ProviderConfigEntry =
-      kind === "anthropic"
-        ? {
-            id,
-            kind,
-            label: "Anthropic",
-            api_key: "",
-            model: "claude-opus-4-7",
-          }
-        : kind === "ollama"
-        ? {
-            id,
-            kind,
-            label: "Ollama (local)",
-            api_key: "",
-            base_url: "http://host.docker.internal:11434",
-            model: "qwen3.5:4b",
-            disable_thinking: true,
-          }
-        : kind === "openai-compat"
-        ? {
-            id,
-            kind,
-            label: "OpenAI",
-            api_key: "",
-            base_url: "https://api.openai.com/v1",
-            model: "gpt-5.4",
-          }
-        : { id, kind, label: "Mock", api_key: "", model: "mock" };
+  function addProviderFromTemplate(templateKey: string) {
+    const tpl = PROVIDER_TEMPLATES.find((t) => t.key === templateKey);
+    if (!tpl) return;
+    const entry = tpl.build();
+    // Templates share a counter for internal id generation but if a user
+    // adds the same template twice in one session we still want unique ids.
+    if (draft.providers.some((p) => p.id === entry.id)) {
+      entry.id = `${entry.id}-${Math.random().toString(36).slice(2, 5)}`;
+    }
     setDraft({
       ...draft,
       providers: [...draft.providers, entry],
@@ -90,48 +70,21 @@ export function SettingsPanel({
         </header>
 
         <section className="p-5 space-y-5">
-          <div>
-            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Your persona</h3>
-            <div className="border border-neutral-800 rounded-md p-3 bg-neutral-950 space-y-2">
-              <LabeledInput
-                label="your name"
-                value={draft.user_persona?.name ?? ""}
-                onChange={(v) =>
-                  setDraft({
-                    ...draft,
-                    user_persona: {
-                      ...(draft.user_persona ?? { name: "You" }),
-                      name: v || "You",
-                    },
-                  })
-                }
-                placeholder="You"
-              />
-              <label className="block">
-                <span className="text-[11px] text-neutral-500 uppercase tracking-wider">
-                  description (optional)
-                </span>
-                <textarea
-                  value={draft.user_persona?.description ?? ""}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      user_persona: {
-                        ...(draft.user_persona ?? { name: "You" }),
-                        description: e.currentTarget.value,
-                      },
-                    })
-                  }
-                  rows={2}
-                  placeholder="A traveler visiting the coastal town for the week…"
-                  className="mt-0.5 w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-sm text-neutral-100 resize-y focus:outline-none focus:border-neutral-600"
-                />
-              </label>
-              <p className="text-[11px] text-neutral-500 leading-relaxed">
-                Injected into the system prompt so the character knows who they're talking to.
-              </p>
-            </div>
-          </div>
+          <PersonasSection
+            personas={draft.user_personas ?? []}
+            activeId={draft.active_persona_id}
+            onChange={(personas, activeId) =>
+              setDraft({
+                ...draft,
+                user_personas: personas,
+                active_persona_id: activeId,
+                // Keep legacy single-persona field in sync with the active
+                // selection so anything reading user_persona still works.
+                user_persona: personas.find((p) => p.id === activeId) ??
+                  personas[0] ?? { id: "default", name: "You" },
+              })
+            }
+          />
 
           <div>
             <h3 className="text-sm font-semibold text-neutral-200 mb-2">Proactive messages</h3>
@@ -251,10 +204,25 @@ export function SettingsPanel({
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-semibold text-neutral-200">LLM providers</h3>
-              <div className="flex gap-1">
-                <MiniBtn onClick={() => addProvider("ollama")}>+ Ollama</MiniBtn>
-                <MiniBtn onClick={() => addProvider("openai-compat")}>+ OpenAI-compat</MiniBtn>
-                <MiniBtn onClick={() => addProvider("anthropic")}>+ Anthropic</MiniBtn>
+              <div className="flex items-center gap-2">
+                <select
+                  className="text-[11px] bg-neutral-900 border border-neutral-700 hover:border-neutral-600 text-neutral-300 rounded px-2 py-0.5"
+                  value=""
+                  onChange={(e) => {
+                    const key = e.currentTarget.value;
+                    if (!key) return;
+                    addProviderFromTemplate(key);
+                    e.currentTarget.value = "";
+                  }}
+                  title="Pick from common providers — base URL + model defaults are pre-filled"
+                >
+                  <option value="">+ add provider…</option>
+                  {PROVIDER_TEMPLATES.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             {draft.providers.filter((p) => p.kind !== "mock").length > 0 && (
@@ -537,20 +505,113 @@ function LabeledSelect({
   );
 }
 
-function MiniBtn({
-  onClick,
-  children,
+// Multi-persona CRUD. Personas are user "characters" the chatter swaps
+// between — detective Volkov for noir RP, Aeron for fantasy, etc. The
+// active one (or the per-session override) is injected as <user> in the
+// anti-confab system prompt so the character knows who they're talking to.
+function PersonasSection({
+  personas,
+  activeId,
+  onChange,
 }: {
-  onClick: () => void;
-  children: React.ReactNode;
+  personas: UserPersona[];
+  activeId: string | undefined;
+  onChange: (next: UserPersona[], activeId: string) => void;
 }) {
+  function update(id: string, patch: Partial<UserPersona>): void {
+    const next = personas.map((p) => (p.id === id ? { ...p, ...patch } : p));
+    onChange(next, activeId ?? next[0]?.id ?? "default");
+  }
+
+  function add(): void {
+    // Stable, collision-resistant id from name + timestamp slug. Don't
+    // use crypto.randomUUID() here — id ends up in localStorage and JSON
+    // exports, so a short readable id is friendlier.
+    const id = `persona-${personas.length + 1}-${Math.random()
+      .toString(36)
+      .slice(2, 5)}`;
+    const next = [...personas, { id, name: "Untitled persona" }];
+    onChange(next, id);
+  }
+
+  function remove(id: string): void {
+    if (personas.length <= 1) return; // never empty the list
+    const next = personas.filter((p) => p.id !== id);
+    const newActive = activeId === id ? next[0].id : activeId ?? next[0].id;
+    onChange(next, newActive);
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className="text-[11px] px-2 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
-    >
-      {children}
-    </button>
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-neutral-200">Your personas</h3>
+        <button
+          onClick={add}
+          className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-neutral-300 hover:border-neutral-600 hover:text-neutral-100"
+        >
+          + add persona
+        </button>
+      </div>
+      <p className="text-[11px] text-neutral-500 leading-relaxed mb-2">
+        Each persona is a user-character you can swap between per session. The
+        active one is what the character thinks they're talking to.
+      </p>
+      <div className="space-y-2">
+        {personas.map((p) => {
+          const isActive = p.id === activeId;
+          return (
+            <div
+              key={p.id}
+              className={`border rounded-md p-3 space-y-2 ${
+                isActive
+                  ? "border-emerald-700/60 bg-emerald-950/20"
+                  : "border-neutral-800 bg-neutral-950"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <input
+                    type="radio"
+                    name="active-persona"
+                    checked={isActive}
+                    onChange={() =>
+                      onChange(personas, p.id)
+                    }
+                    className="accent-emerald-500"
+                    title="Make this the default persona for new sessions"
+                  />
+                  <input
+                    type="text"
+                    value={p.name}
+                    onChange={(e) => update(p.id, { name: e.currentTarget.value })}
+                    placeholder="Persona name"
+                    className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded px-2 py-0.5 text-sm text-neutral-100 focus:outline-none focus:border-neutral-600"
+                  />
+                </div>
+                {personas.length > 1 && (
+                  <button
+                    onClick={() => remove(p.id)}
+                    className="text-[11px] text-neutral-500 hover:text-red-400 px-1"
+                    title="Remove this persona"
+                  >
+                    remove
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={p.description ?? ""}
+                onChange={(e) =>
+                  update(p.id, { description: e.currentTarget.value })
+                }
+                placeholder="A traveler visiting the coastal town for the week…"
+                rows={2}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-sm text-neutral-100 resize-y focus:outline-none focus:border-neutral-600"
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

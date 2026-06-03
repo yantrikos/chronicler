@@ -13,6 +13,7 @@ import { useState } from "react";
 import type { Character } from "../../lib/orchestrator/types";
 import type { YantrikClient } from "../../lib/yantrikdb/client";
 import { rememberAsCanon } from "../../lib/yantrikdb/client";
+import type { World } from "../../lib/worlds/store";
 
 interface Props {
   character: Character;
@@ -20,9 +21,17 @@ interface Props {
   onSave: (updated: Character) => void | Promise<void>;
   client?: YantrikClient;
   onOpenLorebook?: () => void;
+  worlds?: World[];
 }
 
-export function CharacterEditor({ character, onClose, onSave, client, onOpenLorebook }: Props) {
+export function CharacterEditor({
+  character,
+  onClose,
+  onSave,
+  client,
+  onOpenLorebook,
+  worlds,
+}: Props) {
   const [draft, setDraft] = useState<Character>({ ...character });
 
   function update<K extends keyof Character>(key: K, value: Character[K]) {
@@ -189,6 +198,40 @@ export function CharacterEditor({ character, onClose, onSave, client, onOpenLore
               className="w-full bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-sm text-neutral-100 focus:outline-none focus:border-neutral-600"
             />
           </Field>
+
+          {worlds && worlds.length > 0 && (
+            <Field
+              label="worlds"
+              hint="Shared lorebooks this character belongs to. Entries are unioned with the character's private lorebook at scan time."
+            >
+              <div className="flex flex-wrap gap-1.5">
+                {worlds.map((w) => {
+                  const assigned = (draft.world_ids ?? []).includes(w.id);
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => {
+                        const cur = draft.world_ids ?? [];
+                        const next = assigned
+                          ? cur.filter((id) => id !== w.id)
+                          : [...cur, w.id];
+                        update("world_ids", next);
+                      }}
+                      className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                        assigned
+                          ? "border-emerald-600 bg-emerald-900/30 text-emerald-200"
+                          : "border-neutral-800 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200"
+                      }`}
+                    >
+                      {assigned ? "✓ " : ""}
+                      {w.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+          )}
         </section>
 
         <footer className="px-5 py-3 border-t border-neutral-800 flex items-center justify-between">

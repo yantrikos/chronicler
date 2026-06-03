@@ -7,6 +7,10 @@ interface Props {
   onSend: (text: string) => void | Promise<void>;
   isThinking?: boolean;
   recap?: string;
+  /** Deterministic, rule-based summary of active + paused arcs to render
+   *  alongside the LLM-generated recap. Pure string; never touches the
+   *  recap LLM prompt (the most hallucination-prone surface). */
+  activeArcsLine?: string;
   characterName?: string;
   speakerNames?: Record<string, string>;
   speakerAvatars?: Record<string, string>;
@@ -28,6 +32,7 @@ export function ChatPane({
   onSend,
   isThinking,
   recap,
+  activeArcsLine,
   characterName,
   speakerNames = {},
   speakerAvatars = {},
@@ -67,14 +72,24 @@ export function ChatPane({
 
   return (
     <section className="flex h-full flex-col bg-neutral-900">
-      {recap && (
+      {(recap || activeArcsLine) && (
         <div className="px-6 py-3 border-b border-neutral-800 bg-neutral-950/60">
           <p className="text-[11px] uppercase tracking-wider text-emerald-500/70 font-semibold">
             Previously on…
           </p>
-          <div className="text-sm text-neutral-300 mt-1 leading-relaxed prose prose-invert prose-sm max-w-none">
-            <ReactMarkdown>{recap}</ReactMarkdown>
-          </div>
+          {recap && (
+            <div className="text-sm text-neutral-300 mt-1 leading-relaxed prose prose-invert prose-sm max-w-none">
+              <ReactMarkdown>{recap}</ReactMarkdown>
+            </div>
+          )}
+          {activeArcsLine && (
+            <p className="text-[12px] text-neutral-400 mt-2 leading-snug">
+              <span className="text-[10px] uppercase tracking-wider text-violet-400/80 font-semibold mr-1.5">
+                arcs:
+              </span>
+              {activeArcsLine}
+            </p>
+          )}
         </div>
       )}
 
@@ -84,24 +99,38 @@ export function ChatPane({
             No turns yet. Say something to {characterName ?? "the character"}.
           </p>
         )}
-        {turns.map((t, idx) => (
-          <MessageBubble
-            key={t.id}
-            turn={t}
-            isLastAssistant={
-              idx === turns.length - 1 && t.role === "assistant"
-            }
-            isHighlighted={t.id === highlightTurnId}
-            displayName={speakerNames[t.speaker]}
-            avatarUrl={speakerAvatars[t.speaker]}
-            onEdit={onEditMessage}
-            onDelete={onDeleteMessage}
-            onRegenerate={onRegenerate}
-            onContinue={onContinue}
-            onSwipeChange={onSwipeChange}
-            onFork={onFork}
-          />
-        ))}
+        {turns.map((t, idx) => {
+          // System turns are narrator-style (dice rolls, scene markers,
+          // /help output). Centered, italic, less prominent than character
+          // dialogue but still selectable + deletable.
+          if (t.role === "system") {
+            return (
+              <NarratorRow
+                key={t.id}
+                turn={t}
+                onDelete={onDeleteMessage}
+              />
+            );
+          }
+          return (
+            <MessageBubble
+              key={t.id}
+              turn={t}
+              isLastAssistant={
+                idx === turns.length - 1 && t.role === "assistant"
+              }
+              isHighlighted={t.id === highlightTurnId}
+              displayName={speakerNames[t.speaker]}
+              avatarUrl={speakerAvatars[t.speaker]}
+              onEdit={onEditMessage}
+              onDelete={onDeleteMessage}
+              onRegenerate={onRegenerate}
+              onContinue={onContinue}
+              onSwipeChange={onSwipeChange}
+              onFork={onFork}
+            />
+          );
+        })}
         {streamingText !== undefined && streamingText.length > 0 && (
           <div className="flex justify-start gap-2">
             <div className="max-w-[75%] rounded-xl px-3.5 py-2 text-sm leading-relaxed bg-neutral-800 text-neutral-100 opacity-90">
@@ -112,9 +141,16 @@ export function ChatPane({
             </div>
           </div>
         )}
-        {isThinking && streamingText === undefined && (
-          <div className="text-xs text-neutral-500 italic">thinking…</div>
-        )}
+        {/* Pre-stream indicator: from the moment the user sends until the
+            first chunk lands (retrieval + LLM TTFT), there's a multi-
+            second gap where streamingText is "" — not undefined. The
+            previous condition (=== undefined) hid the indicator during
+            exactly the window when feedback matters most. Show a real
+            bubble so the user can see the character is composing. */}
+        {isThinking &&
+          (streamingText === undefined || streamingText.length === 0) && (
+            <ThinkingBubble characterName={characterName} />
+          )}
       </div>
 
       <form
@@ -403,5 +439,67 @@ function IconBtn({
     >
       {children}
     </button>
+  );
+}
+
+// "Character is thinking" bubble — shown from the moment the user
+// sends until the first stream chunk lands (or, for non-streaming
+// providers, until the final reply replaces it). Three pulsing dots in
+// a bubble that mirrors the assistant style so the layout doesn't jump
+// when the real reply takes its place.
+function ThinkingBubble({ characterName }: { characterName?: string }) {
+  return (
+    <div
+      className="flex justify-start gap-2"
+      aria-live="polite"
+      aria-label={`${characterName ?? "Character"} is composing a reply`}
+    >
+      <div className="rounded-xl px-3.5 py-2.5 bg-neutral-800/70 border border-neutral-800">
+        <p className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1 font-semibold">
+          {characterName ?? "…"}
+        </p>
+        <div className="flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-pulse [animation-delay:-0.3s]" />
+          <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-pulse [animation-delay:-0.15s]" />
+          <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-pulse" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Narrator-style row for system turns — dice rolls, /help output, scene
+// markers. Centered, muted, but still selectable + deletable so users can
+// clean up accidental commands.
+function NarratorRow({
+  turn,
+  onDelete,
+}: {
+  turn: ChatTurn;
+  onDelete?: (id: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      id={`turn-${turn.id}`}
+      className="group flex justify-center my-1"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="relative max-w-[78%] rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-1.5 text-[12px] text-neutral-400 italic leading-relaxed">
+        <div className="prose prose-invert prose-sm max-w-none [&_p]:my-0 [&_p]:text-neutral-400 [&_strong]:text-neutral-200 [&_code]:text-emerald-300">
+          <ReactMarkdown>{turn.content}</ReactMarkdown>
+        </div>
+        {hovered && onDelete && (
+          <button
+            className="absolute -right-7 top-1.5 text-[10px] text-neutral-600 hover:text-red-400"
+            onClick={() => onDelete(turn.id)}
+            title="Remove this narrator line"
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

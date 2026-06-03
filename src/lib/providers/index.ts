@@ -139,7 +139,16 @@ export class OpenAICompatProvider implements LlmProvider {
       );
     }
     const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content ?? "";
+    // Reasoning models (deepseek-r1, gpt-5 thinking, etc) sometimes put the
+    // final answer in `reasoning` instead of `content` when the reasoning
+    // budget consumes the whole output token cap (finish_reason="length").
+    // Fall back to reasoning when content is empty so JSON-emitting
+    // verifiers don't silently get "".
+    const msg = data?.choices?.[0]?.message ?? {};
+    const content: string =
+      (typeof msg.content === "string" && msg.content.length > 0)
+        ? msg.content
+        : (typeof msg.reasoning === "string" ? msg.reasoning : "");
     return {
       content,
       usage: data?.usage
@@ -341,6 +350,99 @@ export class AnthropicProvider implements LlmProvider {
       if (o?.type === "content_block_delta" && o?.delta?.text)
         return o.delta.text;
       return undefined;
+    });
+  }
+}
+
+// --- Google Gemini ---
+//
+// Gemini's native API has its own request body shape — `contents` instead
+// of `messages`, `parts[]` for content blocks, `systemInstruction` as a
+// separate top-level field, and `generationConfig` for sampling controls.
+// Streaming uses the same /streamGenerateContent endpoint with
+// alt=sse to get SSE framing. Models accept `temperature`, `topP`, `topK`,
+// `maxOutputTokens` and ignore `min_p` / `repetition_penalty`.
+
+export class GeminiProvider implements LlmProvider {
+  name = "gemini";
+  constructor(
+    private apiKey: string,
+    private baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+  ) {}
+
+  private buildBody(req: ChatRequest) {
+    const s = req.sampling ?? {};
+    // Gemini wants user/model turns; map our assistant role to "model".
+    const contents = req.messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
+    return {
+      contents,
+      systemInstruction: req.system
+        ? { parts: [{ text: req.system }] }
+        : undefined,
+      generationConfig: {
+        temperature: s.temperature ?? req.temperature ?? 0.9,
+        topP: s.top_p,
+        topK: s.top_k,
+        maxOutputTokens: req.max_tokens ?? 1024,
+      },
+    };
+  }
+
+  private endpoint(model: string, streaming: boolean): string {
+    const action = streaming ? "streamGenerateContent" : "generateContent";
+    // API key goes in a query param; alt=sse on streaming makes it use SSE
+    // framing instead of one giant JSON array.
+    const qs = streaming
+      ? `?alt=sse&key=${encodeURIComponent(this.apiKey)}`
+      : `?key=${encodeURIComponent(this.apiKey)}`;
+    return `${this.baseUrl}/models/${encodeURIComponent(model)}:${action}${qs}`;
+  }
+
+  async chat(req: ChatRequest): Promise<ChatResponse> {
+    const res = await proxyFetch({
+      target_url: this.endpoint(req.model, false),
+      headers: { "content-type": "application/json" },
+      body: this.buildBody(req),
+    });
+    if (!res.ok) {
+      throw new Error(`gemini chat failed: ${res.status} ${await res.text()}`);
+    }
+    const data = await res.json();
+    const content = (data?.candidates?.[0]?.content?.parts ?? [])
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("");
+    return {
+      content,
+      usage: data?.usageMetadata
+        ? {
+            prompt_tokens: data.usageMetadata.promptTokenCount ?? 0,
+            completion_tokens: data.usageMetadata.candidatesTokenCount ?? 0,
+          }
+        : undefined,
+    };
+  }
+
+  async *stream(req: ChatRequest): AsyncIterable<string> {
+    const res = await proxyFetch({
+      target_url: this.endpoint(req.model, true),
+      headers: { "content-type": "application/json" },
+      body: this.buildBody(req),
+    });
+    if (!res.ok || !res.body) {
+      throw new Error(`gemini stream failed: ${res.status}`);
+    }
+    yield* parseSseDeltas(res.body, (obj) => {
+      const o = obj as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      const parts = o?.candidates?.[0]?.content?.parts ?? [];
+      const txt = parts.map((p) => p.text ?? "").join("");
+      return txt || undefined;
     });
   }
 }

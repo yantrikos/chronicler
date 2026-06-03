@@ -3,6 +3,8 @@
 // and give the user a live view of what the character is "thinking about
 // between turns."
 
+import { useState } from "react";
+
 export interface ThinkTrigger {
   id: string;
   trigger_type: string;
@@ -46,14 +48,34 @@ export function ThinkPanel({
   onRunThink,
   isThinking,
 }: Props) {
+  // Collapsible because the panel can swell with 10+ DECAY_REVIEW urges
+  // and push the Inspector tabs (Memory / Character / Threads / Arcs)
+  // below the fold. The flex-shrink-0 on the root keeps the panel out
+  // of the Inspector's flex-1 lane; the collapse lets users hide it
+  // entirely when they're focused on chat.
+  const [collapsed, setCollapsed] = useState(false);
   const hasAnything = triggers.length > 0 || conflicts.length > 0;
   return (
-    <div className="border-b border-neutral-800 bg-neutral-950">
-      <div className="flex items-center justify-between px-4 py-2">
-        <h3 className="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">
+    <div className="border-b border-neutral-800 bg-neutral-950 flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 gap-2">
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-neutral-500 hover:text-neutral-200 font-semibold transition-colors"
+          aria-expanded={!collapsed}
+        >
+          <span className="text-neutral-600 text-[9px]">
+            {collapsed ? "▸" : "▾"}
+          </span>
           {characterName ? `${characterName} — thinking` : "Thinking"}
-        </h3>
-        {onRunThink && (
+          {hasAnything && (
+            <span className="ml-1 text-[9px] font-mono text-amber-500/80 normal-case tracking-normal">
+              {triggers.length > 0 ? `${triggers.length} urges` : ""}
+              {triggers.length > 0 && conflicts.length > 0 ? " · " : ""}
+              {conflicts.length > 0 ? `${conflicts.length} conflicts` : ""}
+            </span>
+          )}
+        </button>
+        {onRunThink && !collapsed && (
           <button
             onClick={onRunThink}
             disabled={isThinking}
@@ -65,13 +87,15 @@ export function ThinkPanel({
         )}
       </div>
 
-      {!hasAnything && (
+      {!collapsed && !hasAnything && (
         <p className="text-[11px] text-neutral-600 italic px-4 pb-3">
           No pending urges or conflicts. Hit think to consolidate.
         </p>
       )}
 
-      {triggers.length > 0 && (
+      {!collapsed && hasAnything && (
+        <div className="max-h-[35vh] overflow-y-auto">
+          {triggers.length > 0 && (
         <section className="px-4 py-2 border-t border-neutral-900">
           <p className="text-[10px] uppercase tracking-wider text-amber-500/80 mb-1.5 font-semibold">
             urges ({triggers.length})
@@ -136,7 +160,7 @@ export function ThinkPanel({
         </section>
       )}
 
-      {conflicts.length > 0 && (
+          {conflicts.length > 0 && (
         <section className="px-4 py-2 border-t border-neutral-900">
           <p className="text-[10px] uppercase tracking-wider text-red-500/80 mb-1.5 font-semibold">
             conflicts ({conflicts.length})
@@ -215,7 +239,9 @@ export function ThinkPanel({
               +{conflicts.length - 3} more conflicts
             </p>
           )}
-        </section>
+            </section>
+          )}
+        </div>
       )}
     </div>
   );

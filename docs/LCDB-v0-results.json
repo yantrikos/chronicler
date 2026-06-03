@@ -1,0 +1,256 @@
+{
+  "generated_at": "see ci log",
+  "results": [
+    {
+      "scenario_id": "scenario_1_emotional_deflection",
+      "condition": "skills_on",
+      "measurements": {
+        "reuse": [
+          true,
+          true,
+          true
+        ],
+        "restraint": [
+          true,
+          true,
+          true
+        ],
+        "used_in_reply": [
+          true,
+          true,
+          true
+        ],
+        "faithfulness": true,
+        "outcome_positive_correct": true,
+        "outcome_negative_correct": true
+      }
+    },
+    {
+      "scenario_id": "scenario_1_emotional_deflection",
+      "condition": "skills_off",
+      "measurements": {
+        "reuse": [
+          false,
+          false,
+          false
+        ],
+        "restraint": [
+          true,
+          true,
+          true
+        ],
+        "used_in_reply": [
+          false,
+          false,
+          false
+        ],
+        "faithfulness": true,
+        "outcome_positive_correct": true,
+        "outcome_negative_correct": true
+      }
+    },
+    {
+      "scenario_id": "scenario_2_procedural_ritual",
+      "condition": "skills_on",
+      "measurements": {
+        "reuse": [
+          true,
+          true,
+          true
+        ],
+        "restraint": [
+          true,
+          true,
+          true
+        ],
+        "used_in_reply": [
+          true,
+          true,
+          true
+        ],
+        "faithfulness": true,
+        "outcome_positive_correct": true,
+        "outcome_negative_correct": true
+      }
+    },
+    {
+      "scenario_id": "scenario_2_procedural_ritual",
+      "condition": "skills_off",
+      "measurements": {
+        "reuse": [
+          false,
+          false,
+          false
+        ],
+        "restraint": [
+          true,
+          true,
+          true
+        ],
+        "used_in_reply": [
+          false,
+          false,
+          false
+        ],
+        "faithfulness": true,
+        "outcome_positive_correct": true,
+        "outcome_negative_correct": true
+      }
+    },
+    {
+      "scenario_id": "scenario_3_lesson_ask_before_assume",
+      "condition": "skills_on",
+      "measurements": {
+        "reuse": [
+          true,
+          true,
+          true
+        ],
+        "restraint": [
+          true,
+          true,
+          true
+        ],
+        "used_in_reply": [
+          true,
+          true,
+          true
+        ],
+        "faithfulness": true,
+        "outcome_positive_correct": true,
+        "outcome_negative_correct": true
+      }
+    },
+    {
+      "scenario_id": "scenario_3_lesson_ask_before_assume",
+      "condition": "skills_off",
+      "measurements": {
+        "reuse": [
+          false,
+          false,
+          false
+        ],
+        "restraint": [
+          true,
+          true,
+          true
+        ],
+        "used_in_reply": [
+          false,
+          false,
+          false
+        ],
+        "faithfulness": true,
+        "outcome_positive_correct": true,
+        "outcome_negative_correct": true
+      }
+    }
+  ],
+  "rows": [
+    {
+      "scenario": "scenario_1_emotional_deflection",
+      "metric": "skill surfaces when relevant",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "0/3 (0%)",
+      "delta": "+3"
+    },
+    {
+      "scenario": "scenario_1_emotional_deflection",
+      "metric": "no surface on irrelevant probes",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "3/3 (100%)",
+      "delta": "+0"
+    },
+    {
+      "scenario": "scenario_1_emotional_deflection",
+      "metric": "model output reflects the skill",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "0/3 (0%)",
+      "delta": "+3"
+    },
+    {
+      "scenario": "scenario_1_emotional_deflection",
+      "metric": "inspector faithfulness",
+      "skills_on": "1/1",
+      "skills_off": "1/1",
+      "delta": "—"
+    },
+    {
+      "scenario": "scenario_1_emotional_deflection",
+      "metric": "outcome calibration (+1 / -1)",
+      "skills_on": "1/1",
+      "skills_off": "1/1",
+      "delta": "—"
+    },
+    {
+      "scenario": "scenario_2_procedural_ritual",
+      "metric": "skill surfaces when relevant",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "0/3 (0%)",
+      "delta": "+3"
+    },
+    {
+      "scenario": "scenario_2_procedural_ritual",
+      "metric": "no surface on irrelevant probes",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "3/3 (100%)",
+      "delta": "+0"
+    },
+    {
+      "scenario": "scenario_2_procedural_ritual",
+      "metric": "model output reflects the skill",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "0/3 (0%)",
+      "delta": "+3"
+    },
+    {
+      "scenario": "scenario_2_procedural_ritual",
+      "metric": "inspector faithfulness",
+      "skills_on": "1/1",
+      "skills_off": "1/1",
+      "delta": "—"
+    },
+    {
+      "scenario": "scenario_2_procedural_ritual",
+      "metric": "outcome calibration (+1 / -1)",
+      "skills_on": "1/1",
+      "skills_off": "1/1",
+      "delta": "—"
+    },
+    {
+      "scenario": "scenario_3_lesson_ask_before_assume",
+      "metric": "skill surfaces when relevant",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "0/3 (0%)",
+      "delta": "+3"
+    },
+    {
+      "scenario": "scenario_3_lesson_ask_before_assume",
+      "metric": "no surface on irrelevant probes",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "3/3 (100%)",
+      "delta": "+0"
+    },
+    {
+      "scenario": "scenario_3_lesson_ask_before_assume",
+      "metric": "model output reflects the skill",
+      "skills_on": "3/3 (100%)",
+      "skills_off": "0/3 (0%)",
+      "delta": "+3"
+    },
+    {
+      "scenario": "scenario_3_lesson_ask_before_assume",
+      "metric": "inspector faithfulness",
+      "skills_on": "1/1",
+      "skills_off": "1/1",
+      "delta": "—"
+    },
+    {
+      "scenario": "scenario_3_lesson_ask_before_assume",
+      "metric": "outcome calibration (+1 / -1)",
+      "skills_on": "1/1",
+      "skills_off": "1/1",
+      "delta": "—"
+    }
+  ]
+}

@@ -6,6 +6,16 @@ import { YantrikClient, type RecallResult } from "../yantrikdb/client";
 import { ns } from "../yantrikdb/types";
 import type { TurnRequest } from "./types";
 
+export interface SurfacedSkill {
+  skill_id: string;
+  body: string;
+  skill_type: string;
+  applies_to: string[];
+  score?: number;
+  uses?: number;
+  success_rate?: number;
+}
+
 export interface RetrievalResult {
   canon: RecallResult[];
   scene: RecallResult[];
@@ -13,6 +23,10 @@ export interface RetrievalResult {
   graph: RecallResult[];
   temporal_triggers: string[];
   pending_conflicts: number;
+  /** Skills surfaced from skill_substrate ranked by relevance. State
+   *  filtering (suppressed/archived hidden) happens in compose so the
+   *  pipeline stays I/O-only. */
+  surfaced_skills: SurfacedSkill[];
   latency_ms: number;
 }
 
@@ -33,12 +47,29 @@ export async function retrieveForTurn(
     req.speaker === "user" ? req.character.id : req.speaker;
   const speaker = visibilitySubject;
   const charNs = ns.character(req.character.id);
-  const worldNs = req.character.world_id
-    ? ns.world(req.character.world_id)
-    : undefined;
+  // Union the character's legacy single-world field with the new
+  // world_ids[] array — characters can belong to multiple worlds and
+  // every world's namespace contributes canon recalls.
+  const worldIds = new Set<string>();
+  if (req.character.world_id) worldIds.add(req.character.world_id);
+  for (const w of req.character.world_ids ?? []) worldIds.add(w);
   const sessionNs = ns.session(req.session_id);
 
-  const [canonChar, canonWorld, scene, heuristic, tempUp, _tempStale, conflicts] =
+  // Fan out per-world canon recalls in parallel with the main calls.
+  const worldRecallPromise = Promise.all(
+    [...worldIds].map((wid) =>
+      client.recall({
+        query,
+        namespace: ns.world(wid),
+        speaker,
+        tier: "canon",
+        top_k: 8,
+        expand_entities: true,
+      })
+    )
+  );
+
+  const [canonChar, worldRecalls, scene, heuristic, tempUp, _tempStale, conflicts, skills] =
     await Promise.all([
       // Canon memories for active character
       client.recall({
@@ -49,17 +80,7 @@ export async function retrieveForTurn(
         top_k: 12,
         expand_entities: true,
       }),
-      // Canon world lore (if world set)
-      worldNs
-        ? client.recall({
-            query,
-            namespace: worldNs,
-            speaker,
-            tier: "canon",
-            top_k: 8,
-            expand_entities: true,
-          })
-        : Promise.resolve({ count: 0, results: [], confidence: 0, hints: [] }),
+      worldRecallPromise,
       // Recent scene state (reflex tier, session-scoped)
       client.recall({
         query: query || "recent scene",
@@ -82,17 +103,35 @@ export async function retrieveForTurn(
       client.temporalStale(charNs).catch(() => ({ result: "[]" })),
       // Conflicts pending for the character
       client.conflictPending(charNs).catch(() => ({ result: "[]" })),
+      // Surfaced skills — query is the current user message, scoped to the
+      // active character. Returns top 10; compose filters by derived state.
+      client.skillSurface(query || "current scene", {
+        applies_to: [req.character.id],
+        top_k: 10,
+      }),
     ]);
 
   const t1 = performance.now();
 
   return {
-    canon: mergeRankByScore([canonChar.results, canonWorld.results]),
+    canon: mergeRankByScore([
+      canonChar.results,
+      ...worldRecalls.map((w) => w.results),
+    ]),
     scene: scene.results,
     heuristic: heuristic.results,
     graph: [], // filled later by graph.depth from current turn entities (Phase 2)
     temporal_triggers: extractTriggers(tempUp),
     pending_conflicts: countConflicts(conflicts),
+    surfaced_skills: skills.map((s) => ({
+      skill_id: s.skill_id,
+      body: s.body,
+      skill_type: s.skill_type,
+      applies_to: s.applies_to,
+      score: s.score,
+      uses: s.uses,
+      success_rate: s.success_rate,
+    })),
     latency_ms: Math.round(t1 - t0),
   };
 }

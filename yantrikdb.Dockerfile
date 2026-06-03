@@ -14,10 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only torch first (much smaller), then yantrikdb-mcp which pulls
-# the rest. sentence-transformers needs torch; we want the slim CPU wheel.
+# Install CPU-only torch first (much smaller), then yantrikdb-mcp WITH the
+# [onnx] extra — required for the 384-dim sentence-transformers embedder
+# that existing chronicler DBs were created against. Without it, recall +
+# skill calls error: "ONNX embedder requested but optional deps not
+# installed." The slim install would default to a 64-dim bundled embedder
+# and silently fail to recall any 384-dim memories already in the volume.
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install yantrikdb-mcp
+    && pip install 'yantrikdb-mcp[onnx]'
 
 RUN mkdir -p /data
 VOLUME ["/data"]

@@ -66,8 +66,22 @@ First-run flow:
 - **Session replay harness.** Every tier transition logs a structured entry; the auto-promotion threshold can be retuned and replayed against prior sessions to see exactly which promotions would have fired. The "sink-risk" of the whole system is visible and tunable.
 - **Anti-confabulation clause.** Prepended to every system prompt: "treat only the facts in `<canon>` and `<scene>` as real, do not reference prior events not in those sections." Combined with the visibility ACL, the model cannot invent memory it wasn't given.
 - **"Previously on..." recap at session start.** Pulled from consolidated canon, not raw chat history. Strict anti-confab prompting on the recap itself after we caught (and fixed) a real-world confabulation where the recap misattributed facts.
+- **Verified character learning.** Patterns the model shows repeatedly across sessions (deflection styles, conduct rules, decision rituals, lessons from past failures) get distilled into typed `skill_substrate` entries — but only after an LLM verifier passes on each candidate, biased toward rejection. Skills surface back into future prompts when relevant, score `+1` / `−1` from user reactions (regenerate / edit / delete vs accept and move on), and transition through `candidate → active → suppressed → archived` based on accumulated outcomes. There's a "Character development" tab next to "Memory" with approve / disable / archive controls; the local override always wins over the derived state. See [docs/LCDB-v0.md](docs/LCDB-v0.md) for the ablation harness that proves the contract holds.
 
-All of the above is verified by automated tests: `three-day-continuity`, `auto-promote`, `secret-stays-private`, `session-replay`, `lorebook`, `extract`, `mcp-connectivity`. Everything green.
+All of the above is verified by automated tests: `three-day-continuity`, `auto-promote`, `secret-stays-private`, `session-replay`, `lorebook`, `extract`, `skill-former`, `skill-outcomes`, `lcdb-v0`, `mcp-connectivity`. Everything green.
+
+For a head-to-head comparison against SillyTavern, RisuAI, and AgnAistic, see [docs/COMPARISON.md](docs/COMPARISON.md). Headline:
+
+| | Chronicler | SillyTavern | RisuAI | AgnAistic |
+|---|---|---|---|---|
+| Tiered cross-session memory (canon / heuristic / reflex) | ✅ | 🟡 plugin | 🟡 lorebook | 🟡 memory book |
+| Anti-confabulation clause built into every prompt | ✅ | ❌ user adds | ❌ | ❌ |
+| Memory conflict detection + auto-resolve | ✅ | ❌ | ❌ | ❌ |
+| Skills + drift + preferences substrates (3 inspectors) | ✅ | ❌ | ❌ | ❌ |
+| Prompt inspector with token budget + retrieval reasoning | ✅ | 🟡 structure only | 🟡 | ❌ |
+| Group-chat memory ACL (`visible_to`, retrieval-time filter) | ✅ | ❌ prompt-level | ❌ | ❌ |
+| Scene Intensity dropdown (first-class, no jailbreak) | ✅ | ❌ | ❌ | ❌ |
+| Extension ecosystem | ❌ | ✅ huge | 🟡 | 🟡 |
 
 ---
 

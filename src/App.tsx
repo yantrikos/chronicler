@@ -27,9 +27,10 @@ import { decomposeCard, buildSystemPrompt } from "./lib/cards/decompose";
 import { YantrikClient } from "./lib/yantrikdb/client";
 import { InMemoryTransport } from "./lib/yantrikdb/memory-transport";
 import { McpTransport } from "./lib/yantrikdb/mcp-transport";
-import type { YantrikDBTransport } from "./lib/yantrikdb/client";
+import type { YantrikDBTransport, RecallResult } from "./lib/yantrikdb/client";
 import {
   AnthropicProvider,
+  GeminiProvider,
   OllamaProvider,
   OpenAICompatProvider,
   type LlmProvider,
@@ -45,9 +46,101 @@ import {
   ConflictVerifier,
   type ConflictCheck,
 } from "./lib/orchestrator/verify-conflict";
+import {
+  SkillFormer,
+  type FormedSkill,
+} from "./lib/orchestrator/skill-former";
+import { DriftFormer } from "./lib/orchestrator/relationship-drift";
+import {
+  PreferenceFormer,
+  applyUserDisposition,
+} from "./lib/orchestrator/preference-former";
+import type { InspectorPreference } from "./lib/preferences/types";
+import {
+  listPreferences,
+  updatePreferenceState,
+  writePreference,
+} from "./lib/preferences/substrate";
+import {
+  loadCharacterPrefSettings,
+  saveCharacterPrefSettings,
+  type CharacterPrefSettings,
+} from "./lib/preferences/store";
+import { PreferenceInspector } from "./components/Inspector/PreferenceInspector";
+import {
+  SkillOutcomeTracker,
+  type SkillObservation,
+  deriveState,
+  decodeNote,
+} from "./lib/orchestrator/skill-outcomes";
+import type { SkillState } from "./lib/instrumentation/skill-transition-log";
+import {
+  SkillInspector,
+  type InspectorSkill,
+} from "./components/Inspector/SkillInspector";
+import {
+  clearSkillOverride,
+  loadSkillOverrides,
+  setSkillOverride,
+} from "./lib/skills/overrides";
+import { PresetPicker } from "./components/Settings/PresetPicker";
+import { parseSlash, executeSlash } from "./lib/slash/commands";
+import { IntensityPicker } from "./components/Settings/IntensityPicker";
+import {
+  DEFAULT_INTENSITY_ID,
+  INTENSITIES,
+  type IntensityId,
+} from "./lib/intensity/registry";
+import {
+  clearIntensitySnippet,
+  loadIntensitySnippets,
+  saveIntensitySnippet,
+} from "./lib/intensity/store";
+import {
+  FirstRunWizard,
+  markWizardDismissed,
+  shouldShowWizard,
+} from "./components/Onboarding/FirstRunWizard";
+import {
+  type World,
+  deleteWorld as storeDeleteWorld,
+  listWorlds,
+  newWorldId,
+  saveWorld,
+} from "./lib/worlds/store";
+import { buildStoryCharacter } from "./lib/story/factory";
+import { DEMOS, type DemoKey } from "./lib/cards/demos";
+import { ThreadsInspector } from "./components/Inspector/ThreadsInspector";
+import type { Thread } from "./lib/threads/types";
+import {
+  type ThreadOverride,
+  type ThreadStatus,
+  clearThreadOverride,
+  isHidden,
+  loadThreadOverrides,
+  setThreadOverride,
+} from "./lib/threads/dismissals";
+import { ArcInspector } from "./components/Inspector/ArcInspector";
+import { clusterArcs, summarizeActiveArcs } from "./lib/arcs/cluster";
+import type { Arc } from "./lib/arcs/types";
+import {
+  type ArcOverride,
+  type ArcOverrideStatus,
+  clearArcOverride,
+  loadArcOverrides,
+  setArcOverride,
+} from "./lib/arcs/overrides";
+import {
+  DEFAULT_PRESET_ID,
+  PRESETS,
+  resolvePreset,
+  samplingMatchesPreset,
+  type PresetId,
+} from "./lib/sampling/presets";
 import { startSession } from "./lib/session/lifecycle";
 import { generateRecap } from "./lib/recap/generator";
 import {
+  activePersona,
   activeProvider,
   defaultConfig,
   extractionProvider,
@@ -55,6 +148,7 @@ import {
   saveConfig,
   type ChroniclerConfig,
   type ProviderConfigEntry,
+  type UserPersona,
 } from "./lib/config";
 import {
   soloScene,
@@ -93,6 +187,11 @@ function buildTransport(cfg: ChroniclerConfig): YantrikDBTransport {
 
 function buildProvider(p: ProviderConfigEntry): LlmProvider {
   if (p.kind === "anthropic") return new AnthropicProvider(p.api_key);
+  if (p.kind === "gemini")
+    return new GeminiProvider(
+      p.api_key,
+      p.base_url ?? "https://generativelanguage.googleapis.com/v1beta"
+    );
   if (p.kind === "ollama")
     return new OllamaProvider(
       p.base_url ?? "http://host.docker.internal:11434",
@@ -184,6 +283,36 @@ function App() {
   const [thinking, setThinking] = useState(false);
   const [recap, setRecap] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Active scene preset for the current session. Falls back to the app
+  // default; null only before the first session loads. Switching a preset
+  // overwrites the active provider's sampling fields and persists to
+  // SessionMeta.preset_id so the choice survives reloads.
+  const [activePresetId, setActivePresetId] = useState<PresetId>(
+    DEFAULT_PRESET_ID
+  );
+  const [presetToast, setPresetToast] = useState<string | null>(null);
+  // Scene Intensity (Neutral / Fade to Black / Tasteful / Explicit).
+  // Per-session via SessionMeta.intensity_id; app-level default via
+  // ChroniclerConfig.default_intensity_id. Defaults to Neutral so
+  // existing users see no behavior change.
+  const [activeIntensityId, setActiveIntensityId] =
+    useState<IntensityId>(DEFAULT_INTENSITY_ID);
+  // Per-mode snippet overrides loaded from localStorage. The lookup
+  // table is recomputed when a user saves/resets; effective snippet is
+  // override > default.
+  const intensitySnippetsRef = useRef<Partial<Record<IntensityId, string>>>(
+    {}
+  );
+  const [intensitySnippetsVersion, setIntensitySnippetsVersion] = useState(0);
+  /** Lightweight "doing background work" indicator for actions that fire
+   *  multi-second async work without an obvious in-place affordance
+   *  (demo load, card import, session switch). Null = idle. Shown as a
+   *  blocking-style banner at the top of the chat area. */
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  // Per-session persona override. null = use the app-level active persona.
+  // Setting it via onSwitchPersona persists to SessionMeta.persona_id.
+  const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState<boolean>(false);
 
   const transportRef = useRef<YantrikDBTransport>(new InMemoryTransport());
   const clientRef = useRef<YantrikClient>(new YantrikClient(transportRef.current));
@@ -193,13 +322,82 @@ function App() {
   const samplingRef = useRef<
     import("./lib/providers").SamplingOptions | undefined
   >(undefined);
-  const personaRef = useRef<
-    import("./lib/config").UserPersona | undefined
-  >(undefined);
+  const personaRef = useRef<UserPersona | undefined>(undefined);
+  /** Per-session persona override (id). Wins over config.active_persona_id
+   *  when resolving personaRef in rebuildRuntime + onSwitchPersona. */
+  const sessionPersonaIdRef = useRef<string | undefined>(undefined);
   const conflictVerifierRef = useRef<ConflictVerifier | null>(null);
+  const skillFormerRef = useRef<SkillFormer | null>(null);
+  const driftFormerRef = useRef<DriftFormer | null>(null);
+  const preferenceFormerRef = useRef<PreferenceFormer | null>(null);
+  const skillTrackerRef = useRef<SkillOutcomeTracker | null>(null);
+  // Per-skill derived state. Populated lazily by the outcome tracker on
+  // every record/refresh; consumed by the orchestrator's getSkillState
+  // callback to gate prompt surfacing (suppressed/archived → hidden).
+  const skillStateRef = useRef<Map<string, SkillState>>(new Map());
+  // Which skills were injected into each assistant turn's prompt. The
+  // outcome loop scores the skills from the prior assistant turn when the
+  // user sends their next message, or when a regenerate / edit / delete
+  // signals a negative.
+  const promptedSkillsByTurnRef = useRef<Map<string, string[]>>(new Map());
+  /** Per-rid why_retrieved hints captured from the most recent turn's
+   *  retrieval pass. Surfaces as small chips on memory rows in the
+   *  inspector so users can see WHY each memory was recalled. Cleared
+   *  on character/session change. */
+  const lastWhyRetrievedRef = useRef<Map<string, string[]>>(new Map());
+  // Skills formed this session, accumulated in a ref so we can show a count
+  // in the header without re-triggering a render on every formation. The
+  // Skills tab in Phase 8.3 reads the substrate directly, not this list.
+  const formedSkillsRef = useRef<FormedSkill[]>([]);
+  const [formedSkillCount, setFormedSkillCount] = useState(0);
+  // User overrides for skill state (approve/disable/archive). Loaded once
+  // and mutated through helpers that persist to localStorage. Wins over
+  // derived state inside getSkillState.
+  const skillOverridesRef = useRef<Map<string, SkillState>>(new Map());
+  const [inspectedSkills, setInspectedSkills] = useState<InspectorSkill[]>([]);
+  const [inspectorTab, setInspectorTab] = useState<
+    "memory" | "skills" | "preferences" | "threads" | "arcs"
+  >("memory");
+  /** Active character preferences pulled from the preferences:<id>
+   *  namespace. Repopulated on character change + after PreferenceFormer
+   *  runs. */
+  const [inspectedPreferences, setInspectedPreferences] = useState<
+    InspectorPreference[]
+  >([]);
+  /** Per-character preference settings (auto-keep toggles, identity
+   *  notes). Localstorage-backed. Keyed by character_id. */
+  const characterPrefSettingsRef = useRef<
+    Map<string, CharacterPrefSettings>
+  >(new Map());
+  const [characterPrefSettingsVersion, setCharacterPrefSettingsVersion] =
+    useState(0);
+  /** Per-character identity notes (manual-only labels: sub/dom/etc).
+   *  Localstorage-backed. */
+  const identityNotesRef = useRef<Map<string, string>>(new Map());
+  /** Last-run formation status, shown beneath the "look for patterns now"
+   *  button. Visible feedback so users don't have to open dev console. */
+  const [preferenceStatus, setPreferenceStatus] = useState<string | null>(
+    null
+  );
+  /** Open threads — populated by refreshThreads() from the per-character
+   *  namespace via client.listThreads(upcoming) + (stale). Renders in the
+   *  Threads tab. */
+  const [allThreads, setAllThreads] = useState<Thread[]>([]);
+  /** Per-thread overrides (dismissed/snoozed/resolved/pinned). Loaded
+   *  from localStorage at boot; filtered against allThreads at render. */
+  const threadOverridesRef = useRef<Map<string, ThreadOverride>>(new Map());
+  const [threadOverridesVersion, setThreadOverridesVersion] = useState(0);
+  /** True while the user-triggered formation run is in flight — used by
+   *  the Character Development tab's button to show a spinner + disable. */
+  const [formationRunning, setFormationRunning] = useState(false);
+  /** Arc overrides — same pattern as threads but for cross-session
+   *  narrative clusters. Lives in localStorage. */
+  const arcOverridesRef = useRef<Map<string, ArcOverride>>(new Map());
+  const [arcOverridesVersion, setArcOverridesVersion] = useState(0);
   const [streamingText, setStreamingText] = useState<string | undefined>(undefined);
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [authorNote, setAuthorNote] = useState<string>("");
+  const [authorNoteDepth, setAuthorNoteDepth] = useState<number>(0);
   const [authorNoteOpen, setAuthorNoteOpen] = useState(false);
   const [greetingIndex, setGreetingIndex] = useState<number>(0);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -216,6 +414,7 @@ function App() {
   const lastUserTurnAtRef = useRef<number>(Date.now());
   const [view, setView] = useState<"library" | "chat">("chat");
   const [libraryCharacters, setLibraryCharacters] = useState<Character[]>([]);
+  const [worlds, setWorlds] = useState<World[]>([]);
 
   useEffect(() => {
     const cfg = loadConfig();
@@ -225,10 +424,98 @@ function App() {
     setSessions(sess);
     const chars = listCharacters();
     setLibraryCharacters(chars);
+    setWorlds(listWorlds());
     // Land on the library view when there are prior characters and no
     // in-progress chat; jump to chat if nothing imported yet.
     if (chars.length > 0) setView("library");
+    // First-run: no real providers + no persona + no characters → wizard.
+    if (shouldShowWizard(cfg, chars.length > 0)) {
+      setWizardOpen(true);
+    }
   }, []);
+
+  /** Merge a config patch from the wizard and persist. Used at each step
+   *  so partial completion still saves what the user provided. */
+  function applyWizardPatch(patch: Partial<ChroniclerConfig>): void {
+    const next: ChroniclerConfig = { ...config, ...patch };
+    setConfig(next);
+    saveConfig(next);
+    rebuildRuntime(next);
+  }
+
+  function dismissWizard(): void {
+    markWizardDismissed();
+    setWizardOpen(false);
+  }
+
+  // -------- Worlds CRUD --------
+  // Worlds are shared lorebook containers. The store is localStorage-only;
+  // entries themselves live in YantrikDB under `lorebook:<world_id>`.
+  function onCreateWorld(): void {
+    const name = prompt("Name this world:", "Salt Coast")?.trim();
+    if (!name) return;
+    const world: World = {
+      id: newWorldId(),
+      name,
+      created_at: new Date().toISOString(),
+    };
+    saveWorld(world);
+    setWorlds(listWorlds());
+  }
+
+  function onEditWorld(id: string): void {
+    const w = worlds.find((x) => x.id === id);
+    if (!w) return;
+    const name = prompt("Rename world:", w.name)?.trim();
+    if (!name || name === w.name) return;
+    saveWorld({ ...w, name });
+    setWorlds(listWorlds());
+  }
+
+  function onDeleteWorld(id: string): void {
+    storeDeleteWorld(id);
+    // Cascade: remove this world id from every character's world_ids list
+    // so we don't leave dangling references. Characters with no remaining
+    // worlds stay, just without the lost world's lorebook.
+    const updated = libraryCharacters.map((c) =>
+      (c.world_ids ?? []).includes(id)
+        ? { ...c, world_ids: (c.world_ids ?? []).filter((w) => w !== id) }
+        : c
+    );
+    for (const c of updated) {
+      if (c.world_ids !== libraryCharacters.find((x) => x.id === c.id)?.world_ids) {
+        storeSaveCharacter(c);
+      }
+    }
+    setLibraryCharacters(listCharacters());
+    setWorlds(listWorlds());
+  }
+
+  function onEditWorldLorebook(id: string): void {
+    // Reuse the existing LorebookEditor; it accepts any character_id-shaped
+    // namespace. We thread a synthetic "character" with the world id so
+    // LorebookEditor writes go to lorebook:<world_id>. The editor doesn't
+    // care that the id refers to a world; the YantrikDB namespace is just
+    // a string.
+    setLorebookCharacterId(id);
+  }
+
+  /** Spin up a freeform-narrative session — synthesizes a story character
+   *  (narrator system prompt + `story` tag) and starts a new session for
+   *  it. Story characters live in the regular character library so they
+   *  appear in the grid with a `story` chip. */
+  async function onStartStory(): Promise<void> {
+    const title = prompt("Title this story (optional):", "Untitled story")
+      ?.trim();
+    if (title === undefined) return; // user cancelled
+    const story = buildStoryCharacter({ title: title || undefined });
+    storeSaveCharacter(story);
+    setLibraryCharacters(listCharacters());
+    setCharacters([story]);
+    setSystemPrompts((p) => ({ ...p, [story.id]: story.system_prompt ?? "" }));
+    setView("chat");
+    await startNewSessionForCharacter(story);
+  }
 
   // Persist turns on every change (cheap — localStorage sync, no race).
   useEffect(() => {
@@ -238,11 +525,22 @@ function App() {
       const meta = metaFromScene(sessionId, scene, characters, turns, {
         greeting_index: greetingIndex,
         author_note: authorNote,
+        author_note_depth: authorNoteDepth,
+        intensity_id: activeIntensityId,
       });
       saveSessionMeta(meta);
       setSessions(listSessions());
     }
-  }, [turns, sessionId, scene, characters, greetingIndex, authorNote]);
+  }, [
+    turns,
+    sessionId,
+    scene,
+    characters,
+    greetingIndex,
+    authorNote,
+    authorNoteDepth,
+    activeIntensityId,
+  ]);
 
   // Refresh the inspector whenever the character roster or session changes.
   // Calling refreshMemories() from inside the import handler would read the
@@ -251,7 +549,16 @@ function App() {
   useEffect(() => {
     if (characters.length === 0) return;
     void refreshMemories();
+    void refreshSkills();
+    void refreshPreferences();
+    void refreshThreads();
     void refreshThinkPanel(`character:${characters[0].id}`);
+    // Relationship drift runs once per session/character change. The
+    // DriftFormer's per-(character, target) cache prevents redundant
+    // LLM calls during the same session. To re-evaluate after meaningful
+    // new canon, users can switch sessions or reload — telemetry-driven
+    // re-trigger cadence is a follow-up.
+    void runDriftFormation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characters.map((c) => c.id).join(","), sessionId]);
 
@@ -273,11 +580,54 @@ function App() {
     if (xp && xp.kind !== "mock") {
       const vp = buildProvider(xp);
       conflictVerifierRef.current = new ConflictVerifier(vp, xp.model);
+      skillFormerRef.current = new SkillFormer(
+        clientRef.current,
+        vp,
+        xp.model
+      );
+      driftFormerRef.current = new DriftFormer(
+        clientRef.current,
+        vp,
+        xp.model
+      );
+      preferenceFormerRef.current = new PreferenceFormer(
+        clientRef.current,
+        vp,
+        xp.model
+      );
     } else if (p && p.kind !== "mock") {
       conflictVerifierRef.current = new ConflictVerifier(provider, p.model);
+      skillFormerRef.current = new SkillFormer(
+        clientRef.current,
+        provider,
+        p.model
+      );
+      driftFormerRef.current = new DriftFormer(
+        clientRef.current,
+        provider,
+        p.model
+      );
+      preferenceFormerRef.current = new PreferenceFormer(
+        clientRef.current,
+        provider,
+        p.model
+      );
     } else {
       conflictVerifierRef.current = null;
+      skillFormerRef.current = null;
+      driftFormerRef.current = null;
+      preferenceFormerRef.current = null;
     }
+    // The outcome tracker is provider-independent — it just talks to
+    // YantrikDB. Always build it; even in MockProvider mode it correctly
+    // no-ops on transport calls.
+    skillTrackerRef.current = new SkillOutcomeTracker(clientRef.current);
+    skillStateRef.current = new Map();
+    promptedSkillsByTurnRef.current = new Map();
+    skillOverridesRef.current = loadSkillOverrides();
+    threadOverridesRef.current = loadThreadOverrides();
+    arcOverridesRef.current = loadArcOverrides();
+    intensitySnippetsRef.current = loadIntensitySnippets();
 
     samplingRef.current = p
       ? {
@@ -288,7 +638,12 @@ function App() {
           repetition_penalty: p.repetition_penalty,
         }
       : undefined;
-    personaRef.current = cfg.user_persona;
+    // Resolve the effective persona: session override (loaded into
+     // sessionPersonaIdRef) wins; falls back to the app-level active.
+    const sessionOverride = sessionPersonaIdRef.current
+      ? cfg.user_personas?.find((p) => p.id === sessionPersonaIdRef.current)
+      : undefined;
+    personaRef.current = sessionOverride ?? activePersona(cfg);
     refreshMemories();
   }
 
@@ -302,6 +657,10 @@ function App() {
         getRecentTurns: async () => turns.slice(-10),
         userPersona: personaRef.current,
         sampling: samplingRef.current,
+        maxResponseTokens: activeProvider(config)?.max_response_tokens,
+        getSkillState: (skill_id) =>
+          skillOverridesRef.current.get(skill_id) ??
+          skillStateRef.current.get(skill_id),
       }),
     [turns, config]
   );
@@ -364,8 +723,60 @@ function App() {
 
       setTriggers(filterVisibleTriggers(trigs));
       await updateConflictsWithVerification(confs);
+
+      // Skill formation runs in the background — YantrikDB's pattern /
+      // lesson / unresolved / contradiction triggers are the inputs.
+      // The former caches per trigger_id so re-entry is free; we don't
+      // need to await its completion to render the panel.
+      void runSkillFormation(ns, trigs);
     } catch {
       // non-fatal
+    }
+  }
+
+  /** Feed skill-candidate triggers through the LLM verifier and persist
+   *  confirmed skills to YantrikDB's skill substrate. Non-blocking, cached. */
+  async function runSkillFormation(
+    namespaceArg: string,
+    trigs: ThinkTrigger[]
+  ): Promise<void> {
+    const former = skillFormerRef.current;
+    if (!former) return; // mock provider mode — skip
+    const characterId = namespaceArg.startsWith("character:")
+      ? namespaceArg.slice("character:".length)
+      : null;
+    if (!characterId) return;
+    const candidateKinds = new Set([
+      "pattern",
+      "lesson",
+      "unresolved",
+      "contradiction",
+    ]);
+    const candidates = trigs
+      .filter((t) => candidateKinds.has(t.trigger_type))
+      .map((t) => ({
+        trigger_id: t.id,
+        reason: t.reason,
+        source_rids: t.source_rids,
+        character_id: characterId,
+        character_name: characters.find((c) => c.id === characterId)?.name,
+      }));
+    if (candidates.length === 0) return;
+    try {
+      const formed = await former.formFromCandidates(candidates);
+      if (formed.length > 0) {
+        const seen = new Set(formedSkillsRef.current.map((s) => s.skill_id));
+        const fresh = formed.filter((s) => !seen.has(s.skill_id));
+        if (fresh.length > 0) {
+          formedSkillsRef.current = [...formedSkillsRef.current, ...fresh];
+          setFormedSkillCount(formedSkillsRef.current.length);
+          // New skills landed — pull the catalog so the inspector tab
+          // reflects them without waiting for the user to open it.
+          void refreshSkills();
+        }
+      }
+    } catch {
+      // verifier failures are already swallowed inside the former
     }
   }
 
@@ -548,7 +959,629 @@ function App() {
     }
   }
 
+  /** Pull the active character's skill catalog from YantrikDB, derive
+   *  state per skill (overrides win), populate both the inspector view
+   *  and skillStateRef which the pipeline uses to gate prompt surfacing. */
+  async function refreshSkills(): Promise<void> {
+    if (characters.length === 0) {
+      setInspectedSkills([]);
+      return;
+    }
+    const client = clientRef.current;
+    const now = new Date();
+    const out: InspectorSkill[] = [];
+    for (const char of characters) {
+      const list = await client
+        .skillList({ applies_to: [char.id], limit: 100 })
+        .catch(() => [] as Awaited<ReturnType<typeof client.skillList>>);
+      for (const s of list) {
+        // Substrate's `list` doesn't return outcomes — pull them via `get`
+        // to derive state. Cap the requests; in practice a session has
+        // dozens of skills, not hundreds.
+        const full = await client.skillGet(s.skill_id).catch(() => null);
+        const outcomes = (full?.outcomes ?? []) as Array<{
+          succeeded: boolean;
+          note?: string;
+          at: string;
+        }>;
+        const successes = outcomes.filter((o) => o.succeeded).length;
+        // Drop outcomes that don't carry our encoded note — they didn't
+        // come from Chronicler's tracker and shouldn't drive transitions.
+        const trackedOutcomes = outcomes.filter((o) => decodeNote(o.note));
+        const derived = deriveState(trackedOutcomes, now, "candidate");
+        const override = skillOverridesRef.current.get(s.skill_id);
+        const finalState: SkillState = override ?? derived;
+        skillStateRef.current.set(s.skill_id, derived);
+        out.push({
+          skill_id: s.skill_id,
+          body: s.body,
+          skill_type: s.skill_type,
+          applies_to: s.applies_to,
+          state: finalState,
+          uses: outcomes.length,
+          successes,
+        });
+      }
+    }
+    // Sort active first, then candidate, then suppressed/archived. Within
+    // each group, most-used first.
+    const order: Record<SkillState, number> = {
+      active: 0,
+      candidate: 1,
+      suppressed: 2,
+      archived: 3,
+    };
+    out.sort(
+      (a, b) => order[a.state] - order[b.state] || b.uses - a.uses
+    );
+    setInspectedSkills(out);
+  }
+
+  function onSkillApprove(skill_id: string): void {
+    skillOverridesRef.current = setSkillOverride(skill_id, "active");
+    setInspectedSkills((ss) =>
+      ss.map((s) => (s.skill_id === skill_id ? { ...s, state: "active" } : s))
+    );
+  }
+  function onSkillDisable(skill_id: string): void {
+    skillOverridesRef.current = setSkillOverride(skill_id, "suppressed");
+    setInspectedSkills((ss) =>
+      ss.map((s) =>
+        s.skill_id === skill_id ? { ...s, state: "suppressed" } : s
+      )
+    );
+  }
+  function onSkillArchive(skill_id: string): void {
+    skillOverridesRef.current = setSkillOverride(skill_id, "archived");
+    setInspectedSkills((ss) =>
+      ss.map((s) =>
+        s.skill_id === skill_id ? { ...s, state: "archived" } : s
+      )
+    );
+  }
+  function onSkillClearOverride(skill_id: string): void {
+    skillOverridesRef.current = clearSkillOverride(skill_id);
+    const derived = skillStateRef.current.get(skill_id) ?? "candidate";
+    setInspectedSkills((ss) =>
+      ss.map((s) => (s.skill_id === skill_id ? { ...s, state: derived } : s))
+    );
+  }
+
+  // -------- Open Threads --------
+  /** Pull upcoming + stale memories for every active character and unify
+   *  into a single Thread[] for the inspector. Falls back to empty on
+   *  transport errors; the inspector renders an empty state cleanly. */
+  async function refreshThreads(): Promise<void> {
+    if (characters.length === 0) {
+      setAllThreads([]);
+      return;
+    }
+    const client = clientRef.current;
+    try {
+      const batches = await Promise.all(
+        characters.flatMap((c) => [
+          client.listThreads(`character:${c.id}`, "upcoming", { limit: 20 }),
+          client.listThreads(`character:${c.id}`, "stale", {
+            days: 14,
+            limit: 20,
+          }),
+        ])
+      );
+      const seen = new Set<string>();
+      const out: Thread[] = [];
+      for (const batch of batches) {
+        for (const t of batch) {
+          if (seen.has(t.id)) continue;
+          seen.add(t.id);
+          out.push(t);
+        }
+      }
+      // Stable order: pinned first, then stale, then upcoming, importance desc.
+      const overrides = threadOverridesRef.current;
+      out.sort((a, b) => {
+        const ap = overrides.get(a.id)?.status === "pinned" ? 0 : 1;
+        const bp = overrides.get(b.id)?.status === "pinned" ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        if (a.kind !== b.kind) return a.kind === "stale" ? -1 : 1;
+        return (b.importance ?? 0) - (a.importance ?? 0);
+      });
+      setAllThreads(out);
+    } catch {
+      setAllThreads([]);
+    }
+  }
+
+  function onThreadAction(
+    id: string,
+    status: ThreadStatus,
+    untilIso?: string
+  ): void {
+    threadOverridesRef.current = setThreadOverride(id, status, {
+      until: untilIso,
+    });
+    setThreadOverridesVersion((v) => v + 1);
+  }
+
+  function onThreadClearOverride(id: string): void {
+    threadOverridesRef.current = clearThreadOverride(id);
+    setThreadOverridesVersion((v) => v + 1);
+  }
+
+  function onArcAction(id: string, status: ArcOverrideStatus): void {
+    arcOverridesRef.current = setArcOverride(id, status);
+    setArcOverridesVersion((v) => v + 1);
+  }
+
+  function onArcClearOverride(id: string): void {
+    arcOverridesRef.current = clearArcOverride(id);
+    setArcOverridesVersion((v) => v + 1);
+  }
+
+  // -------- Scene Intensity --------
+  /** Resolve the effective snippet for the given intensity: user
+   *  override (from localStorage) wins over registry default. Returns
+   *  the empty string for Neutral or when the override is the empty
+   *  string (which signals "user explicitly cleared it"). */
+  function effectiveIntensitySnippet(id: IntensityId): string {
+    const override = intensitySnippetsRef.current[id];
+    if (override !== undefined) return override;
+    return INTENSITIES[id].default_snippet;
+  }
+  /** True iff the user has NOT overridden the snippet for this mode
+   *  (i.e. effective === default). Drives the "reset to default"
+   *  affordance in the picker. */
+  function isIntensityDefault(id: IntensityId): boolean {
+    return intensitySnippetsRef.current[id] === undefined;
+  }
+  function onIntensitySelect(id: IntensityId): void {
+    setActiveIntensityId(id);
+    // Also persist as the app-level default so newly-created sessions
+    // start with the user's most recent choice. Per-session value is
+    // captured by the existing useEffect that watches activeIntensityId.
+    const next: ChroniclerConfig = {
+      ...config,
+      default_intensity_id: id,
+    };
+    setConfig(next);
+    saveConfig(next);
+  }
+  function onIntensitySaveSnippet(id: IntensityId, snippet: string): void {
+    saveIntensitySnippet(id, snippet);
+    intensitySnippetsRef.current = loadIntensitySnippets();
+    setIntensitySnippetsVersion((v) => v + 1);
+  }
+  function onIntensityResetSnippet(id: IntensityId): void {
+    clearIntensitySnippet(id);
+    intensitySnippetsRef.current = loadIntensitySnippets();
+    setIntensitySnippetsVersion((v) => v + 1);
+  }
+
+  /** Manual "look for patterns now" — runs think() on the active
+   *  character's namespace then the full skill + drift formation
+   *  pipeline. Used from the Character Development tab when prior
+   *  memory exists but no skills have surfaced (the auto-cadence is
+   *  every-4-turns + on-session-end; existing data hasn't seen it). */
+  async function onRunFormationNow(): Promise<void> {
+    if (characters.length === 0 || formationRunning) return;
+    setFormationRunning(true);
+    setBusyAction("Looking for patterns in this character's memory…");
+    const client = clientRef.current;
+    const primary = characters[0];
+    try {
+      await client
+        .think(`character:${primary.id}`)
+        .catch(() => undefined);
+      // refreshThinkPanel populates the trigger list which runSkillFormation
+      // then consumes. runDriftFormation + runPreferenceFormation pull canon
+      // directly.
+      await refreshThinkPanel(`character:${primary.id}`);
+      await runDriftFormation();
+      await runPreferenceFormation();
+      await refreshSkills();
+      await refreshPreferences();
+    } finally {
+      setFormationRunning(false);
+      setBusyAction(null);
+    }
+  }
+
+  /** Pull recent canon + scene reflex tagged with character_id, run the
+   *  preference verifier. Confirmed preferences write to the
+   *  preferences:<id> substrate. Settings.auto_keep_ordinary controls
+   *  whether new ordinary interpretations auto-activate; private +
+   *  limit always start as candidate. */
+  async function runPreferenceFormation(): Promise<void> {
+    const former = preferenceFormerRef.current;
+    if (!former) {
+      const msg =
+        "Formation skipped — no verifier provider configured. " +
+        "Open settings and add an extraction or generation provider.";
+      console.warn("[prefs] " + msg);
+      setPreferenceStatus(msg);
+      return;
+    }
+    if (characters.length === 0) {
+      console.warn("[prefs] formation skipped — no character loaded");
+      return;
+    }
+    // Drop cached verifier output so a re-click actually re-asks the LLM.
+    // Without this, an earlier empty result would stick across clicks.
+    for (const c of characters) former.invalidate(c.id);
+    const statusParts: string[] = [];
+    const client = clientRef.current;
+    for (const char of characters) {
+      const settings = getCharSettings(char.id);
+      // Pull memories by namespace using memory.list — no semantic query
+      // needed. (Earlier attempt with recall(query: "") returned 0 because
+      // yantrikdb rejects empty queries. listMemoriesInNamespace is the
+      // right primitive here: namespace-scoped + recency-ordered.)
+      const [charRows, sessionRows] = await Promise.all([
+        client.listMemoriesInNamespace(`character:${char.id}`, 60).catch((e) => {
+          console.warn("[prefs] character list failed", e);
+          return [] as RecallResult[];
+        }),
+        sessionId
+          ? client.listMemoriesInNamespace(`session:${sessionId}`, 60).catch((e) => {
+              console.warn("[prefs] session list failed", e);
+              return [] as RecallResult[];
+            })
+          : Promise.resolve([] as RecallResult[]),
+      ]);
+      const seen = new Set<string>();
+      const merged: RecallResult[] = [];
+      for (const r of charRows) {
+        if (seen.has(r.rid)) continue;
+        seen.add(r.rid);
+        merged.push(r);
+      }
+      for (const r of sessionRows) {
+        if (seen.has(r.rid)) continue;
+        seen.add(r.rid);
+        merged.push(r);
+      }
+      console.log(
+        `[prefs] ${char.name}: char_ns=${charRows.length} session_ns=${sessionRows.length} merged=${merged.length}`
+      );
+      if (merged.length < 2) {
+        const msg = `${char.name}: no memories to analyze yet`;
+        console.log(`[prefs] ${msg}`);
+        statusParts.push(msg);
+        continue;
+      }
+      try {
+        const formed = await former.formFromCandidate(
+          {
+            character_id: char.id,
+            character_name: char.name,
+            session_id: sessionId ?? "no-session",
+            recent_memories: merged,
+          },
+          settings
+        );
+        const visible = formed.filter(
+          (f) => f.preference.interpretation_level !== "observation"
+        ).length;
+        console.log(
+          `[prefs] ${char.name}: verifier formed ${formed.length} (${visible} visible, ${formed.length - visible} observations are hidden)`
+        );
+        if (formed.length === 0) {
+          statusParts.push(
+            `${char.name}: scanned ${merged.length} memories, verifier produced 0 candidates (see console for raw LLM output)`
+          );
+        } else if (visible === 0) {
+          statusParts.push(
+            `${char.name}: verifier produced ${formed.length} observations only (UI hides observations; ${merged.length} memories scanned)`
+          );
+        } else {
+          statusParts.push(
+            `${char.name}: ${visible} new preference${visible === 1 ? "" : "s"} surfaced`
+          );
+        }
+      } catch (e) {
+        console.warn(`[prefs] ${char.name}: verifier threw`, e);
+        statusParts.push(`${char.name}: verifier failed — see console`);
+      }
+    }
+    setPreferenceStatus(statusParts.join(" · "));
+  }
+
+  /** Fetch the per-character settings, lazily initializing from
+   *  localStorage on first read. */
+  function getCharSettings(character_id: string): CharacterPrefSettings {
+    let s = characterPrefSettingsRef.current.get(character_id);
+    if (!s) {
+      s = loadCharacterPrefSettings(character_id);
+      characterPrefSettingsRef.current.set(character_id, s);
+    }
+    return s;
+  }
+
+  async function refreshPreferences(): Promise<void> {
+    if (characters.length === 0) {
+      setInspectedPreferences([]);
+      return;
+    }
+    const client = clientRef.current;
+    const all: InspectorPreference[] = [];
+    for (const char of characters) {
+      const prefs = await listPreferences(client, char.id).catch(() => []);
+      all.push(...prefs);
+    }
+    // Sort: limits first (within their group), then by recency.
+    const sensOrder = { limit: 0, private: 1, ordinary: 2 } as const;
+    all.sort((a, b) => {
+      const s =
+        (sensOrder[a.sensitivity] ?? 9) - (sensOrder[b.sensitivity] ?? 9);
+      if (s !== 0) return s;
+      return b.created_at.localeCompare(a.created_at);
+    });
+    setInspectedPreferences(all);
+  }
+
+  function onPreferenceKeep(pref: InspectorPreference): void {
+    const client = clientRef.current;
+    void applyUserDisposition(
+      client,
+      preferenceFormerRef.current!,
+      pref,
+      "kept",
+      pref.character_id
+    ).then(() => refreshPreferences());
+  }
+  function onPreferenceDismiss(pref: InspectorPreference): void {
+    const client = clientRef.current;
+    void applyUserDisposition(
+      client,
+      preferenceFormerRef.current!,
+      pref,
+      "dismissed",
+      pref.character_id
+    ).then(() => refreshPreferences());
+  }
+  async function onPreferenceEdit(
+    pref: InspectorPreference,
+    newStatement: string
+  ): Promise<void> {
+    const trimmed = newStatement.trim();
+    if (!trimmed || trimmed === pref.statement) return;
+    // Edit = rewrite as new preference + dismiss old. Keeps the
+    // dedup-by-id invariant clean.
+    const client = clientRef.current;
+    await updatePreferenceState(client, pref.rid, "dismissed");
+    await writePreference(client, {
+      ...pref,
+      id: undefined as unknown as string, // let writePreference recompute
+      statement: trimmed,
+      state: "active", // user-edited → user-confirmed
+      created_at: new Date().toISOString(),
+    });
+    await refreshPreferences();
+  }
+  function onIdentityNotesChange(characterId: string, notes: string): void {
+    identityNotesRef.current.set(characterId, notes);
+    try {
+      localStorage.setItem(
+        `chronicler.identity_notes_v1.${characterId}`,
+        notes
+      );
+    } catch {
+      /* skip */
+    }
+  }
+  function onCharacterPrefSettingsChange(
+    characterId: string,
+    next: CharacterPrefSettings
+  ): void {
+    characterPrefSettingsRef.current.set(characterId, next);
+    saveCharacterPrefSettings(characterId, next);
+    setCharacterPrefSettingsVersion((v) => v + 1);
+  }
+  /** Split the character's active preferences into the three buckets
+   *  the orchestrator's anti-confab block expects. ONLY state=active
+   *  rows reach the prompt — observed/candidate/dismissed are inspector-
+   *  only. The trailing "tendencies not rules" instruction is appended
+   *  by withAntiConfabulation when any bucket has content. */
+  function derivePromptedPreferences(
+    characterId: string
+  ): { ordinary: string[]; private: string[]; limits: string[] } | undefined {
+    const active = inspectedPreferences.filter(
+      (p) => p.character_id === characterId && p.state === "active"
+    );
+    if (active.length === 0) return undefined;
+    const buckets = {
+      ordinary: [] as string[],
+      private: [] as string[],
+      limits: [] as string[],
+    };
+    for (const p of active) {
+      const bucket =
+        p.sensitivity === "limit" ? "limits" : (p.sensitivity as "ordinary" | "private");
+      buckets[bucket].push(p.statement);
+    }
+    if (
+      buckets.ordinary.length === 0 &&
+      buckets.private.length === 0 &&
+      buckets.limits.length === 0
+    ) {
+      return undefined;
+    }
+    return buckets;
+  }
+
+  function loadIdentityNotes(characterId: string): string {
+    let cached = identityNotesRef.current.get(characterId);
+    if (cached !== undefined) return cached;
+    try {
+      const raw = localStorage.getItem(
+        `chronicler.identity_notes_v1.${characterId}`
+      );
+      cached = raw ?? "";
+    } catch {
+      cached = "";
+    }
+    identityNotesRef.current.set(characterId, cached);
+    return cached;
+  }
+
+  /** Pull recent canon for each active character and run the relationship
+   *  drift verifier. Confirmed drift signals write to the skill substrate
+   *  as pattern entries with applies_to=[char, target, axis, dir tag] —
+   *  they surface naturally in the Character Development tab through the
+   *  existing skill render path. Target is "user" for v1. */
+  async function runDriftFormation(): Promise<void> {
+    const former = driftFormerRef.current;
+    if (!former || characters.length === 0) return;
+    const client = clientRef.current;
+    try {
+      const candidates = await Promise.all(
+        characters.map(async (char) => {
+          const recall = await client
+            .recall({
+              query: "recent interactions, relationship signals",
+              namespace: `character:${char.id}`,
+              speaker: char.id,
+              tier: "canon",
+              top_k: 20,
+            })
+            .catch(() => null);
+          if (!recall || recall.results.length < 2) return null;
+          return {
+            character_id: char.id,
+            character_name: char.name,
+            target: "user",
+            target_label: currentPersona().name,
+            recent_memories: recall.results,
+          };
+        })
+      );
+      const real = candidates.filter(
+        (c): c is NonNullable<typeof c> => c !== null
+      );
+      if (real.length === 0) return;
+      const formed = await former.formFromCandidates(real);
+      if (formed.length > 0) {
+        // New drift entries are stored as skills; refresh the Character
+        // tab so they appear in-tab without a page reload.
+        void refreshSkills();
+      }
+    } catch {
+      // non-fatal — drift is best-effort enrichment, never blocks the loop
+    }
+  }
+
+  /** Resolve a preset against the active provider and write the resulting
+   *  sampling tuple onto the provider config (so Settings reflects it).
+   *  Stash the choice on the session meta so it survives reloads.
+   *
+   *  opts.silent suppresses the provider-switch toast (used when restoring
+   *  a session — the user didn't actively switch).
+   *  opts.persist=false skips writing to session meta + config (used when
+   *  re-resolving on session load: we already loaded the right id). */
+  function onPickPreset(
+    id: PresetId,
+    opts: { silent?: boolean; persist?: boolean } = {}
+  ): void {
+    const provider = activeProvider(config);
+    const resolved = resolvePreset(id, provider);
+    setActivePresetId(id);
+    if (provider) {
+      const nextProviders = config.providers.map((p) =>
+        p.id === provider.id
+          ? {
+              ...p,
+              temperature: resolved.sampling.temperature,
+              top_p: resolved.sampling.top_p,
+              top_k: resolved.sampling.top_k,
+              min_p: resolved.sampling.min_p,
+              repetition_penalty: resolved.sampling.repetition_penalty,
+            }
+          : p
+      );
+      const nextConfig: ChroniclerConfig = {
+        ...config,
+        providers: nextProviders,
+        default_preset_id:
+          opts.persist === false ? config.default_preset_id : id,
+      };
+      setConfig(nextConfig);
+      if (opts.persist !== false) saveConfig(nextConfig);
+      samplingRef.current = resolved.sampling;
+    }
+    if (opts.persist !== false && sessionId) {
+      const meta = sessions.find((s) => s.id === sessionId);
+      if (meta) {
+        const next = { ...meta, preset_id: id };
+        saveSessionMeta(next);
+        setSessions(listSessions());
+      }
+    }
+    if (!opts.silent && provider) {
+      const preset = PRESETS.find((p) => p.id === id);
+      const supported = resolved.supported_fields.length;
+      if (supported < 5) {
+        setPresetToast(
+          `${preset?.label} adjusted for ${provider.label} — ${supported} of 5 controls apply`
+        );
+      } else {
+        setPresetToast(`${preset?.label} applied`);
+      }
+    }
+  }
+
+  /** Resolve the persona that should be injected into the system prompt
+   *  for the active session — session override wins over the app-level
+   *  active persona. Safe to call any time after config loads. */
+  function currentPersona(): UserPersona {
+    if (activePersonaId) {
+      const override = config.user_personas?.find((p) => p.id === activePersonaId);
+      if (override) return override;
+    }
+    return activePersona(config);
+  }
+
+  /** Swap the persona for the current session. Persists the choice on
+   *  SessionMeta so it survives reload + session list refresh. Updates
+   *  personaRef so the next turn's prompt uses the new persona. */
+  function onSwitchPersona(id: string): void {
+    setActivePersonaId(id);
+    sessionPersonaIdRef.current = id;
+    const next = config.user_personas?.find((p) => p.id === id);
+    if (next) personaRef.current = next;
+    if (sessionId) {
+      const meta = sessions.find((s) => s.id === sessionId);
+      if (meta) {
+        saveSessionMeta({ ...meta, persona_id: id });
+        setSessions(listSessions());
+      }
+    }
+  }
+
+  /** True iff any sampling field on the active provider differs from what
+   *  the active preset would resolve to. Drives the "Custom (was: X)"
+   *  pill label and the reapply affordance in the dropdown. */
+  function isSamplingCustom(): boolean {
+    const provider = activeProvider(config);
+    if (!provider) return false;
+    const resolved = resolvePreset(activePresetId, provider);
+    const current = {
+      temperature: provider.temperature,
+      top_p: provider.top_p,
+      top_k: provider.top_k,
+      min_p: provider.min_p,
+      repetition_penalty: provider.repetition_penalty,
+    };
+    return !samplingMatchesPreset(current, resolved);
+  }
+
+  // Dismiss the preset toast after a couple of seconds.
+  useEffect(() => {
+    if (!presetToast) return;
+    const t = setTimeout(() => setPresetToast(null), 2400);
+    return () => clearTimeout(t);
+  }, [presetToast]);
+
   async function refreshMemories() {
+    const whyMap = lastWhyRetrievedRef.current;
     if (transportRef.current instanceof InMemoryTransport) {
       const all = transportRef.current.all();
       const view: InspectorMemory[] = all.map((m) => ({
@@ -562,6 +1595,7 @@ function App() {
         source: m.source,
         namespace: m.namespace,
         created_at: m.created_at,
+        why_retrieved: whyMap.get(m.rid),
       }));
       setMemories(view);
       return;
@@ -622,6 +1656,7 @@ function App() {
               (r as { source?: string }).source ?? meta.source ?? "user"
             ),
             namespace: ns,
+            why_retrieved: whyMap.get(rid),
           });
         }
       }
@@ -768,6 +1803,7 @@ function App() {
     setNextSpeakerId(primary.id);
     setAuthorNote("");
     setGreetingIndex(0);
+    setRecap(""); // clear any previous-session recap so it doesn't bleed
     const ss = await startSession(clientRef.current, {
       user_id: "user",
       character_ids: [primary.id],
@@ -791,6 +1827,18 @@ function App() {
     );
     await refreshMemories();
     await refreshThinkPanel(`character:${primary.id}`);
+    // Pull "Previously on…" from prior canon so re-opening a character
+    // with persisted memory doesn't feel like a fresh stranger. Matches
+    // switchSession() + startNewSession() behavior (parity bug fix).
+    generateRecap(clientRef.current, {
+      character_id: primary.id,
+      world_id: primary.world_id,
+      speaker: "user",
+      provider: providerRef.current,
+      model: modelRef.current,
+    })
+      .then((r) => setRecap(r.text))
+      .catch(() => undefined);
   }
 
   async function startNewSession(): Promise<void> {
@@ -855,9 +1903,32 @@ function App() {
     });
     setSessionId(meta.id);
     setAuthorNote(meta.author_note ?? "");
+    setAuthorNoteDepth(meta.author_note_depth ?? 0);
+    setActiveIntensityId(
+      (meta.intensity_id as IntensityId | undefined) ??
+        (config.default_intensity_id as IntensityId | undefined) ??
+        DEFAULT_INTENSITY_ID
+    );
+    // Restore the session's persona override (or clear if none).
+    sessionPersonaIdRef.current = meta.persona_id ?? undefined;
+    setActivePersonaId(meta.persona_id ?? null);
+    const personaForSession = meta.persona_id
+      ? config.user_personas?.find((p) => p.id === meta.persona_id) ??
+        activePersona(config)
+      : activePersona(config);
+    personaRef.current = personaForSession;
     setGreetingIndex(meta.greeting_index ?? 0);
     setNextSpeakerId(chars[0].id);
     setTurns(loadTurns(meta.id));
+    // Restore the session's preset choice (or fall back to app default).
+    const restored =
+      (meta.preset_id as PresetId | undefined) ??
+      (config.default_preset_id as PresetId | undefined) ??
+      DEFAULT_PRESET_ID;
+    setActivePresetId(restored);
+    // Re-resolve against the active provider so a session opened on a
+    // different model than it was created on still gets correct sampling.
+    void onPickPreset(restored, { silent: true, persist: false });
     const primary = chars[0];
     generateRecap(clientRef.current, {
       character_id: primary.id,
@@ -900,6 +1971,7 @@ function App() {
 
   async function onImportCard(file: File) {
     setErrorMsg(null);
+    setBusyAction(`Importing ${file.name}…`);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const parsed = await parseCard(bytes);
@@ -934,35 +2006,16 @@ function App() {
             : ""
         }`.trim()
       );
+    } finally {
+      setBusyAction(null);
     }
   }
 
-  async function loadDemoCharacter(which: "ren" | "mei" = "ren") {
-    const cards = {
-      ren: {
-        spec: "chara_card_v2" as const,
-        spec_version: "2.0" as const,
-        data: {
-          name: "Ren",
-          description: "A calm, observant bookseller in a small coastal town.",
-          personality: "Quiet, perceptive, dry humor. Listens more than speaks.",
-          scenario: "Visit to Ren's second-hand bookshop, The Salt Page.",
-          first_mes: "*looks up from the ledger* Found something?",
-        },
-      },
-      mei: {
-        spec: "chara_card_v2" as const,
-        spec_version: "2.0" as const,
-        data: {
-          name: "Mei",
-          description: "A wandering journalist, Ren's sometimes-visitor.",
-          personality: "Curious, warm, asks more questions than she answers.",
-          scenario: "Runs into the user in town, always with a notebook.",
-          first_mes: "*looks up from her notebook* Oh — hi there.",
-        },
-      },
-    };
-    const fakeCard = cards[which];
+  async function loadDemoCharacter(which: DemoKey = "ren") {
+    const meta = DEMOS[which];
+    if (!meta) return;
+    setBusyAction(`Loading demo character: ${meta.label}…`);
+    const fakeCard = meta.card;
     const rawJson = JSON.stringify(fakeCard);
     setErrorMsg(null);
     try {
@@ -991,6 +2044,8 @@ function App() {
             : ""
         }`.trim()
       );
+    } finally {
+      setBusyAction(null);
     }
   }
 
@@ -1010,7 +2065,7 @@ function App() {
     setThinking(true);
     setStreamingText("");
     try {
-      const { assistant_turn, writes_promise } = await orchestrator.turn(
+      const { assistant_turn, writes_promise, prompted_skill_ids, retrieval } = await orchestrator.turn(
         {
           session_id: sessionId,
           user_id: "user",
@@ -1023,10 +2078,37 @@ function App() {
         {
           skipWrites: opts.skipWrites,
           authorNote: authorNote.trim() ? authorNote : undefined,
+          authorNoteDepth,
+          intensitySnippet: effectiveIntensitySnippet(activeIntensityId),
+          preferences: derivePromptedPreferences(speakerChar.id),
+          identityNotes: loadIdentityNotes(speakerChar.id) || undefined,
           onChunk: (_chunk, accumulated) => setStreamingText(accumulated),
         }
       );
       setLastPromptCapture(orchestrator.getLastPromptCapture());
+      // Capture why_retrieved hints from this turn's recalls so the
+      // memory inspector can show provenance badges. Merge into the
+      // existing map rather than replacing — older recall hints stay
+      // valid for memories that didn't re-surface this turn.
+      const whyMap = lastWhyRetrievedRef.current;
+      for (const r of [
+        ...retrieval.canon,
+        ...retrieval.scene,
+        ...retrieval.heuristic,
+        ...retrieval.graph,
+      ]) {
+        if (r.why_retrieved && r.why_retrieved.length > 0) {
+          whyMap.set(r.rid, r.why_retrieved);
+        }
+      }
+      // Record which skills were prompted into this turn so the outcome
+      // loop can score them when the user reacts (or doesn't). For
+      // regenerate-as-swipe, the previous skills WERE shown to the user;
+      // the regeneration itself is the negative signal we'll score below.
+      if (prompted_skill_ids.length > 0) {
+        const targetTurnId = opts.asSwipeOf?.id ?? assistant_turn.id;
+        promptedSkillsByTurnRef.current.set(targetTurnId, prompted_skill_ids);
+      }
       if (opts.appendTo) {
         setTurns([
           ...baseTurns.slice(0, -1),
@@ -1138,11 +2220,47 @@ function App() {
       setErrorMsg("Session still initializing — wait a moment and try again.");
       return;
     }
+    // Slash commands are intercepted before going to the LLM. They land
+    // as system turns in the scene log so subsequent character replies
+    // can react to the dice roll naturally.
+    const parsed = parseSlash(text);
+    if (parsed) {
+      const result = executeSlash(parsed, {
+        participants: characters.map((c) => ({ id: c.id, name: c.name })),
+        random: Math.random,
+      });
+      if (!result) {
+        setErrorMsg(`Bad dice expression: ${parsed.args || "(empty)"}`);
+        return;
+      }
+      const systemTurn: ChatTurn = {
+        id: crypto.randomUUID(),
+        role: "system",
+        speaker: "narrator",
+        content: result.output,
+        created_at: new Date().toISOString(),
+        session_id: sessionId,
+      };
+      setTurns([...turns, systemTurn]);
+      return;
+    }
     const speakerId = nextSpeakerId ?? characters[0].id;
     const speakerChar = characters.find((c) => c.id === speakerId);
     if (!speakerChar) {
       setErrorMsg(`Speaker "${speakerId}" not found among ${characters.length} characters.`);
       return;
+    }
+    // Before sending the next user turn, score the prior assistant turn's
+    // skills positively — the user moved on without regenerating, editing,
+    // or deleting. That's the "no negative signal" path.
+    const prior = [...turns].reverse().find((t) => t.role === "assistant");
+    if (prior) {
+      void scoreSkillsForTurn(prior.id, {
+        turns_observed: 2,
+        regenerated_within: Infinity,
+        retconned_within: Infinity,
+        deleted_related: false,
+      });
     }
     const userTurn: ChatTurn = {
       id: crypto.randomUUID(),
@@ -1157,14 +2275,62 @@ function App() {
     await runAssistantTurn(nextTurns, userTurn, speakerChar);
   }
 
+  /** Score every skill that was injected into the given assistant turn's
+   *  prompt, then refresh the local state cache used by the pipeline's
+   *  suppression filter. Safe to call multiple times — the tracker
+   *  internally dedupes per (skill, session, turn) tuple. The dedup key
+   *  uses the turn's index in `turns` so different assistant turns score
+   *  independently while regen-then-send on the SAME turn dedups
+   *  correctly (regen wins as the first observation, send is ignored). */
+  async function scoreSkillsForTurn(
+    turnId: string,
+    obs: Omit<SkillObservation, "surfaced_at_turn">
+  ): Promise<void> {
+    const tracker = skillTrackerRef.current;
+    const skills = promptedSkillsByTurnRef.current.get(turnId);
+    if (!tracker || !skills || skills.length === 0 || !sessionId) return;
+    const turnIdx = turns.findIndex((t) => t.id === turnId);
+    if (turnIdx < 0) return;
+    const full: SkillObservation = { ...obs, surfaced_at_turn: turnIdx };
+    for (const skill_id of skills) {
+      try {
+        const res = await tracker.record(skill_id, sessionId, full, {
+          currentState: skillStateRef.current.get(skill_id) ?? "candidate",
+        });
+        skillStateRef.current.set(skill_id, res.state_after);
+      } catch {
+        // tracker swallows substrate errors; nothing to do at the UI level
+      }
+    }
+  }
+
   function onEditMessage(turnId: string, newContent: string) {
     setTurns((ts) =>
       ts.map((t) => (t.id === turnId ? { ...t, content: newContent } : t))
     );
+    // Edits to an assistant turn are a retcon — score skills negatively.
+    const edited = turns.find((t) => t.id === turnId);
+    if (edited?.role === "assistant") {
+      void scoreSkillsForTurn(turnId, {
+        turns_observed: 1,
+        regenerated_within: Infinity,
+        retconned_within: 0,
+        deleted_related: false,
+      });
+    }
   }
 
   function onDeleteMessage(turnId: string) {
+    const deleted = turns.find((t) => t.id === turnId);
     setTurns((ts) => ts.filter((t) => t.id !== turnId));
+    if (deleted?.role === "assistant") {
+      void scoreSkillsForTurn(turnId, {
+        turns_observed: 1,
+        regenerated_within: Infinity,
+        retconned_within: Infinity,
+        deleted_related: true,
+      });
+    }
   }
 
   async function onForkSession(atTurnId: string) {
@@ -1221,6 +2387,16 @@ function App() {
     if (target.role !== "assistant") return;
     const speakerChar = characters.find((c) => c.id === target.speaker);
     if (!speakerChar || !sessionId) return;
+
+    // Regenerate IS the negative signal — the user wasn't happy with the
+    // skills' contribution to this turn. Score before we run the new turn
+    // so the suppression filter can already exclude them downstream.
+    void scoreSkillsForTurn(turnId, {
+      turns_observed: 1,
+      regenerated_within: 0,
+      retconned_within: Infinity,
+      deleted_related: false,
+    });
 
     const isLast = idx === turns.length - 1;
     if (isLast) {
@@ -1333,7 +2509,7 @@ function App() {
       meta,
       exportTurns,
       chars,
-      config.user_persona?.name ?? "You"
+      currentPersona().name
     );
     const safeTitle =
       meta.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "session";
@@ -1382,8 +2558,9 @@ function App() {
     if (characters.length === 0 || !scene) return null;
     const speakerChar = characters.find((c) => c.id === (nextSpeakerId ?? characters[0].id));
     if (!speakerChar) return null;
-    const personaName = config.user_persona?.name ?? "You";
-    const personaDesc = config.user_persona?.description ?? "";
+    const cur = currentPersona();
+    const personaName = cur.name;
+    const personaDesc = cur.description ?? "";
     const history = turns
       .slice(-8)
       .map((t) => {
@@ -1422,6 +2599,44 @@ function App() {
       return null;
     }
   }
+
+  /** Threads after applying user overrides — pinned stays visible,
+   *  dismissed/resolved/snoozed-not-yet-expired drop. Reactive to
+   *  threadOverridesVersion so toggling an action re-filters. */
+  const visibleThreads = useMemo(() => {
+    const overrides = threadOverridesRef.current;
+    return allThreads.filter((t) => {
+      const o = overrides.get(t.id);
+      if (o?.status === "pinned") return true;
+      return !isHidden(o);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allThreads, threadOverridesVersion]);
+
+  /** Arcs derived from canon memories via the rule-based clusterer. The
+   *  clusterer is pure + cheap; recomputing on every memories change is
+   *  fine for the inspector's scale (dozens to hundreds of memories). */
+  const arcs = useMemo<Arc[]>(() => {
+    // Cluster only canon — heuristics/reflex aren't durable narrative.
+    const canonOnly = memories.filter((m) => m.tier === "canon");
+    return clusterArcs(
+      canonOnly.map((m) => ({
+        rid: m.rid,
+        text: m.text,
+        importance: m.importance,
+        touched_at: m.created_at ?? new Date().toISOString(),
+        entities: undefined, // clusterer falls back to text extraction
+      }))
+    );
+  }, [memories]);
+
+  // Arc count for the tab badge — respect archived overrides.
+  const arcVisibleCount = useMemo(() => {
+    const overrides = arcOverridesRef.current;
+    return arcs.filter((a) => overrides.get(a.id)?.status !== "archived")
+      .length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arcs, arcOverridesVersion]);
 
   const backendLabel =
     config.yantrikdb.kind === "mcp" ? "yantrikdb" : "memory";
@@ -1484,9 +2699,9 @@ function App() {
             setView("chat");
             void onImportCard(f);
           }}
-          onDemo={() => {
+          onDemo={(key) => {
             setView("chat");
-            void loadDemoCharacter("ren");
+            void loadDemoCharacter(key);
           }}
           onDeleteCharacter={(id) => {
             import("./lib/session/store").then(({ deleteCharacter }) => {
@@ -1496,6 +2711,12 @@ function App() {
           }}
           onEditCharacter={(id) => setEditingCharacterId(id)}
           onOpenSettings={() => setSettingsOpen(true)}
+          worlds={worlds}
+          onCreateWorld={onCreateWorld}
+          onEditWorld={onEditWorld}
+          onEditWorldLorebook={onEditWorldLorebook}
+          onDeleteWorld={onDeleteWorld}
+          onStartStory={() => void onStartStory()}
         />
         {editingCharacterId &&
           (() => {
@@ -1507,6 +2728,7 @@ function App() {
               <CharacterEditor
                 character={target}
                 client={clientRef.current}
+                worlds={worlds}
                 onOpenLorebook={() => {
                   setLorebookCharacterId(target.id);
                   setEditingCharacterId(null);
@@ -1588,23 +2810,29 @@ function App() {
                 }}
               />
             </label>
-            {characters.length === 0 && (
+            {formedSkillCount > 0 && (
               <button
-                className="text-xs rounded bg-emerald-700/80 hover:bg-emerald-600 text-white px-2.5 py-1"
-                onClick={() => loadDemoCharacter("ren")}
+                className="text-[10px] font-mono rounded border border-amber-700/60 text-amber-400 hover:bg-amber-900/30 px-1.5 py-0.5 transition-colors"
+                onClick={() => {
+                  setInspectorTab("skills");
+                  void refreshSkills();
+                }}
+                title={`${formedSkillCount} verified character skill${formedSkillCount === 1 ? "" : "s"} learned this session — click to view`}
               >
-                demo: Ren
+                +{formedSkillCount} skill{formedSkillCount === 1 ? "" : "s"}
               </button>
             )}
-            {characters.length === 1 && characters[0].id.startsWith("ren-") && (
-              <button
-                className="text-xs rounded bg-emerald-700/80 hover:bg-emerald-600 text-white px-2.5 py-1"
-                onClick={() => loadDemoCharacter("mei")}
-                title="Add Mei to make this a group scene"
-              >
-                + Mei (group)
-              </button>
-            )}
+            <PresetPicker
+              presetId={activePresetId}
+              isCustom={isSamplingCustom()}
+              provider={activeProvider(config)}
+              onSelect={(id) => onPickPreset(id)}
+              onReapply={() => onPickPreset(activePresetId)}
+            />
+            <div
+              className="w-px h-5 bg-neutral-800 mx-1"
+              aria-hidden
+            />
             <button
               className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-100 px-2.5 py-1"
               onClick={() => setPromptInspectorOpen(true)}
@@ -1622,12 +2850,10 @@ function App() {
             <button
               className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-100 px-2.5 py-1"
               onClick={() => setSettingsOpen(true)}
+              title={`Settings · ${backendLabel} · ${providerLabel}`}
             >
               settings
             </button>
-            <span className="text-[10px] font-mono text-neutral-600">
-              [{backendLabel} · {providerLabel}]
-            </span>
           </div>
         </header>
         {characters.length > 0 && (
@@ -1651,6 +2877,34 @@ function App() {
                   {c.name}
                 </span>
               ))}
+              {characters.length === 1 && characters[0].id.startsWith("ren-") && (
+                <button
+                  className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-700/60 text-emerald-300 hover:border-emerald-600 hover:text-emerald-200"
+                  onClick={() => loadDemoCharacter("mei")}
+                  title="Add Mei to make this a group scene"
+                >
+                  + Mei (try group)
+                </button>
+              )}
+              {(config.user_personas?.length ?? 0) > 1 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] uppercase tracking-wider text-neutral-500">
+                    as
+                  </span>
+                  <select
+                    className="text-xs bg-neutral-900 border border-neutral-800 rounded px-2 py-0.5 text-neutral-200"
+                    value={currentPersona().id}
+                    onChange={(e) => onSwitchPersona(e.currentTarget.value)}
+                    title="User persona for this session"
+                  >
+                    {config.user_personas?.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {characters.length === 1 &&
                 (characters[0].greetings?.length ?? 0) > 1 && (
                   <div className="flex items-center gap-1">
@@ -1690,20 +2944,39 @@ function App() {
                   </select>
                 </div>
               )}
-              <button
-                onClick={() => setAuthorNoteOpen((v) => !v)}
-                className={`ml-auto text-[11px] px-2 py-0.5 rounded border ${
-                  authorNote.trim()
-                    ? "border-amber-700/60 bg-amber-900/20 text-amber-200"
-                    : "border-neutral-800 text-neutral-400 hover:text-neutral-200"
-                }`}
-                title="Author's note — persistent steering for the scene"
-              >
-                author's note{authorNote.trim() ? " •" : ""}
-              </button>
+              <div className="ml-auto flex items-center gap-1.5">
+                <IntensityPicker
+                  key={`intensity-${intensitySnippetsVersion}`}
+                  intensityId={activeIntensityId}
+                  provider={
+                    activeProvider(config)
+                      ? {
+                          kind: activeProvider(config)!.kind,
+                          model: activeProvider(config)!.model,
+                        }
+                      : undefined
+                  }
+                  currentSnippet={effectiveIntensitySnippet(activeIntensityId)}
+                  isDefault={isIntensityDefault(activeIntensityId)}
+                  onSelect={onIntensitySelect}
+                  onSaveSnippet={onIntensitySaveSnippet}
+                  onResetSnippet={onIntensityResetSnippet}
+                />
+                <button
+                  onClick={() => setAuthorNoteOpen((v) => !v)}
+                  className={`text-[11px] px-2 py-0.5 rounded border ${
+                    authorNote.trim()
+                      ? "border-amber-700/60 bg-amber-900/20 text-amber-200"
+                      : "border-neutral-800 text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Author's note — persistent steering for the scene"
+                >
+                  author's note{authorNote.trim() ? " •" : ""}
+                </button>
+              </div>
             </div>
             {authorNoteOpen && (
-              <div className="px-6 pb-2 pt-0">
+              <div className="px-6 pb-2 pt-0 space-y-1.5">
                 <textarea
                   value={authorNote}
                   onChange={(e) => setAuthorNote(e.currentTarget.value)}
@@ -1711,6 +2984,31 @@ function App() {
                   rows={2}
                   className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-100 resize-y focus:outline-none focus:border-neutral-600"
                 />
+                <div className="flex items-center gap-3 text-[10px] text-neutral-500">
+                  <span className="uppercase tracking-wider">depth</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    step={1}
+                    value={authorNoteDepth}
+                    onChange={(e) =>
+                      setAuthorNoteDepth(Number(e.currentTarget.value))
+                    }
+                    className="flex-1 max-w-[180px] accent-emerald-500"
+                  />
+                  <span className="font-mono text-neutral-400 min-w-[64px]">
+                    {authorNoteDepth === 0
+                      ? "system prompt"
+                      : `${authorNoteDepth} turn${authorNoteDepth === 1 ? "" : "s"} back`}
+                  </span>
+                  <span
+                    className="text-neutral-600 cursor-help"
+                    title="0 = note lives in the system prompt (default, broad steering). 1-5 = injected as a system message N turns before the reply, where the model attends to it more strongly. Higher = closer to the current turn."
+                  >
+                    (?)
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -1726,6 +3024,26 @@ function App() {
             </button>
           </div>
         )}
+        {presetToast && (
+          <div className="px-6 py-1.5 bg-emerald-900/50 border-b border-emerald-800/60 text-emerald-100 text-[11px] flex items-center justify-between gap-4">
+            <span>{presetToast}</span>
+            <button
+              onClick={() => setPresetToast(null)}
+              className="text-emerald-300 hover:text-white text-[10px]"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {busyAction && (
+          <div className="px-6 py-1.5 bg-neutral-800/60 border-b border-neutral-700 text-neutral-200 text-[11px] flex items-center gap-2">
+            <span
+              className="inline-block w-2.5 h-2.5 rounded-full border-2 border-emerald-500/40 border-t-emerald-400 animate-spin"
+              aria-hidden
+            />
+            <span>{busyAction}</span>
+          </div>
+        )}
         <div className="flex-1 min-h-0">
           {characters.length === 0 ? (
             <EmptyState
@@ -1739,7 +3057,7 @@ function App() {
                 };
                 inp.click();
               }}
-              onDemo={() => loadDemoCharacter("ren")}
+              onDemo={(key) => loadDemoCharacter(key)}
               onOpenSettings={() => setSettingsOpen(true)}
               hasPriorSessions={sessions.length > 0}
             />
@@ -1750,6 +3068,7 @@ function App() {
               isThinking={thinking}
               streamingText={streamingText}
               recap={recap}
+              activeArcsLine={summarizeActiveArcs(arcs)}
               characterName={
                 characters.length === 1
                   ? characters[0].name
@@ -1759,7 +3078,7 @@ function App() {
               }
               speakerNames={{
                 ...Object.fromEntries(characters.map((c) => [c.id, c.name])),
-                user: config.user_persona?.name ?? "You",
+                user: currentPersona().name,
               }}
               speakerAvatars={Object.fromEntries(
                 characters
@@ -1803,14 +3122,162 @@ function App() {
           onRunThink={onRunThink}
           isThinking={runningThink}
         />
-        <div className="flex-1 min-h-0">
-          <MemoryInspector
-            memories={memories}
-            onForget={onForget}
-            onPromote={onPromote}
-            onDemote={onDemote}
-            onRetcon={onRetcon}
-          />
+        <div className="flex-1 min-h-0 flex flex-col bg-neutral-950 border-l border-neutral-800">
+          <div className="flex border-b border-neutral-800 text-[11px]">
+            <button
+              className={`flex-1 px-3 py-1.5 text-left ${
+                inspectorTab === "memory"
+                  ? "text-neutral-100 border-b-2 border-emerald-500/60"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+              onClick={() => setInspectorTab("memory")}
+            >
+              memory{memories.length > 0 ? ` · ${memories.length}` : ""}
+            </button>
+            <button
+              className={`flex-1 px-3 py-1.5 text-left ${
+                inspectorTab === "skills"
+                  ? "text-neutral-100 border-b-2 border-emerald-500/60"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+              onClick={() => {
+                setInspectorTab("skills");
+                void refreshSkills();
+              }}
+            >
+              character{inspectedSkills.length > 0 ? ` · ${inspectedSkills.length}` : ""}
+            </button>
+            <button
+              className={`flex-1 px-3 py-1.5 text-left ${
+                inspectorTab === "preferences"
+                  ? "text-neutral-100 border-b-2 border-emerald-500/60"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+              onClick={() => {
+                setInspectorTab("preferences");
+                void refreshPreferences();
+              }}
+            >
+              {(() => {
+                const pending = inspectedPreferences.filter(
+                  (p) => p.state === "candidate"
+                ).length;
+                const active = inspectedPreferences.filter(
+                  (p) => p.state === "active"
+                ).length;
+                if (pending > 0) return `prefs · ${pending} to review`;
+                if (active > 0) return `prefs · ${active}`;
+                return "prefs";
+              })()}
+            </button>
+            <button
+              className={`flex-1 px-3 py-1.5 text-left ${
+                inspectorTab === "threads"
+                  ? "text-neutral-100 border-b-2 border-emerald-500/60"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+              onClick={() => {
+                setInspectorTab("threads");
+                void refreshThreads();
+              }}
+            >
+              threads{visibleThreads.length > 0 ? ` · ${visibleThreads.length}` : ""}
+            </button>
+            <button
+              className={`flex-1 px-3 py-1.5 text-left ${
+                inspectorTab === "arcs"
+                  ? "text-neutral-100 border-b-2 border-emerald-500/60"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+              onClick={() => setInspectorTab("arcs")}
+            >
+              arcs{arcVisibleCount > 0 ? ` · ${arcVisibleCount}` : ""}
+            </button>
+          </div>
+          <div className="flex-1 min-h-0">
+            {inspectorTab === "memory" ? (
+              <MemoryInspector
+                memories={memories}
+                onForget={onForget}
+                onPromote={onPromote}
+                onDemote={onDemote}
+                onRetcon={onRetcon}
+              />
+            ) : inspectorTab === "skills" ? (
+              <SkillInspector
+                skills={inspectedSkills}
+                onApprove={onSkillApprove}
+                onDisable={onSkillDisable}
+                onArchive={onSkillArchive}
+                onClearOverride={onSkillClearOverride}
+                onRunFormation={() => void onRunFormationNow()}
+                isFormationRunning={formationRunning}
+              />
+            ) : inspectorTab === "preferences" ? (
+              (() => {
+                const primary = characters[0];
+                if (!primary) {
+                  return (
+                    <div className="p-6 text-xs text-neutral-500">
+                      Load a character to see preferences.
+                    </div>
+                  );
+                }
+                void characterPrefSettingsVersion; // re-render on settings change
+                const settings = getCharSettings(primary.id);
+                const forChar = inspectedPreferences.filter(
+                  (p) => p.character_id === primary.id
+                );
+                return (
+                  <PreferenceInspector
+                    characterName={primary.name}
+                    preferences={forChar}
+                    settings={settings}
+                    identityNotes={loadIdentityNotes(primary.id)}
+                    isFormationRunning={formationRunning}
+                    formationStatus={preferenceStatus}
+                    onRunFormation={() => void onRunFormationNow()}
+                    onKeep={onPreferenceKeep}
+                    onDismiss={onPreferenceDismiss}
+                    onEdit={onPreferenceEdit}
+                    onIdentityNotesChange={(notes) =>
+                      onIdentityNotesChange(primary.id, notes)
+                    }
+                    onSettingsChange={(next) =>
+                      onCharacterPrefSettingsChange(primary.id, next)
+                    }
+                  />
+                );
+              })()
+            ) : inspectorTab === "threads" ? (
+              <ThreadsInspector
+                threads={visibleThreads}
+                overrides={threadOverridesRef.current}
+                totalBeforeFilter={allThreads.length}
+                onAction={onThreadAction}
+                onClearOverride={onThreadClearOverride}
+                onJumpToMemory={(rid) => {
+                  setInspectorTab("memory");
+                  // Best-effort: scroll the memory row into view after the
+                  // tab swap renders. Memory rows currently aren't keyed
+                  // by rid in the DOM; this is intentionally a no-op
+                  // beyond switching tabs until that's wired (small follow-up).
+                  void rid;
+                }}
+              />
+            ) : (
+              <ArcInspector
+                arcs={arcs}
+                overrides={arcOverridesRef.current}
+                onAction={onArcAction}
+                onClearOverride={onArcClearOverride}
+                onJumpToMemory={(rid) => {
+                  setInspectorTab("memory");
+                  void rid;
+                }}
+              />
+            )}
+          </div>
         </div>
       </aside>
       {settingsOpen && (
@@ -1857,24 +3324,58 @@ function App() {
         />
       )}
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      {wizardOpen && (
+        <FirstRunWizard
+          onComplete={applyWizardPatch}
+          onImportCard={(f) => {
+            void onImportCard(f);
+            dismissWizard();
+          }}
+          onTryDemo={() => {
+            void loadDemoCharacter("ren");
+            dismissWizard();
+          }}
+          onSkip={dismissWizard}
+        />
+      )}
       {lorebookCharacterId &&
         (() => {
-          const target = libraryCharacters.find(
+          // The same editor handles both per-character and world lorebooks
+          // — the YantrikDB namespace prefix is identical (`lorebook:<id>`),
+          // it's only the UI labeling that changes. Look the id up in
+          // characters first, then worlds.
+          const charTarget = libraryCharacters.find(
             (c) => c.id === lorebookCharacterId
           );
-          if (!target) return null;
-          return (
-            <LorebookEditor
-              characterId={target.id}
-              characterName={target.name}
-              worldId={target.world_id}
-              client={clientRef.current}
-              onClose={() => {
-                setLorebookCharacterId(null);
-                refreshMemories();
-              }}
-            />
-          );
+          if (charTarget) {
+            return (
+              <LorebookEditor
+                characterId={charTarget.id}
+                characterName={charTarget.name}
+                worldId={charTarget.world_id}
+                client={clientRef.current}
+                onClose={() => {
+                  setLorebookCharacterId(null);
+                  refreshMemories();
+                }}
+              />
+            );
+          }
+          const worldTarget = worlds.find((w) => w.id === lorebookCharacterId);
+          if (worldTarget) {
+            return (
+              <LorebookEditor
+                characterId={worldTarget.id}
+                characterName={`world: ${worldTarget.name}`}
+                client={clientRef.current}
+                onClose={() => {
+                  setLorebookCharacterId(null);
+                  refreshMemories();
+                }}
+              />
+            );
+          }
+          return null;
         })()}
     </div>
   );

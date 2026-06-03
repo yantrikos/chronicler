@@ -113,6 +113,68 @@ In early dogfood, we caught the recap saying "Ren, whose name is Kiku, has estab
 
 ---
 
+## Skills: the learning loop
+
+The three tiers handle *facts*. They do not handle *behaviors* — the
+recurring style choices and adaptations that make a long-running
+character feel coherent across sessions. That's a separate substrate
+with its own write contract:
+
+> YantrikDB's `think()` loop generates cheap, schema-free pattern /
+> lesson / unresolved / contradiction triggers from accumulated
+> session content. An LLM verifier then decides which of those
+> candidates actually constitute a real, reusable behavior and
+> classifies them into the catalog's formal schema
+> (`procedure | pattern | rule | lesson | reference`) with an
+> `applies_to` scope. Confirmed entries are written to the
+> `skill_substrate` namespace as `state=candidate`. Surfacing them
+> back into a prompt scores `+1` (the user moved on without
+> regenerating, editing, or deleting) or `−1` (any of those negative
+> signals fired within the observation window). State derives from
+> accumulated outcomes: `candidate → active` once net score ≥ `+3`
+> across ≥2 distinct sessions; `active → suppressed` if last 5
+> outcomes net ≤ `−2`; `suppressed → archived` after 7 idle days.
+
+The architectural template is identical to the [conflict verifier](
+../src/lib/orchestrator/verify-conflict.ts):
+**YantrikDB narrows the search space with cheap heuristics; the LLM
+applies semantic judgment on a bounded input; durable state lives in
+the substrate**. This generalizes well beyond Chronicler:
+
+- **Anomaly triage.** Engine flags suspicious events; LLM decides
+  which are worth paging on; outcomes drive false-positive
+  calibration.
+- **Code review automation.** Static analyzer flags candidates; LLM
+  classifies severity + actionability; merge / regen / dismiss is
+  the outcome signal.
+- **Customer-support summarization.** Engine clusters tickets; LLM
+  decides which clusters are real patterns vs noise; resolution rate
+  per pattern drives a similar candidate / active / suppressed loop.
+
+The discipline:
+
+1. **Cheap, schema-free, high-recall detection** at the engine
+   level. Volume is fine — most candidates will be rejected.
+2. **LLM verifier that defaults to NO.** A model tic fossilized as
+   a character "skill" is far worse than a missed real skill — the
+   verifier's system prompt should make that asymmetry explicit.
+3. **Outcomes drive state.** Don't make humans curate; let the
+   surface→react loop decide what stays. Manual override exists for
+   the cases where the loop is wrong.
+4. **State is DERIVED, not stored.** Computing state from the
+   outcome history per query means thresholds can be retuned without
+   a migration. Sidecar overrides handle user-driven correction.
+5. **Ship the ablation.** The [LCDB-v0 harness](./LCDB-v0.md) runs
+   in CI on every commit. If a future change breaks the surfacing
+   contract — say, restraint drops below 100% on probes — the build
+   goes red before the user notices.
+
+[`src/lib/orchestrator/skill-former.ts`](../src/lib/orchestrator/skill-former.ts)
+and [`skill-outcomes.ts`](../src/lib/orchestrator/skill-outcomes.ts)
+are the reference implementation; both ship under 350 lines.
+
+---
+
 ## What this pattern does NOT do
 
 **It is not vector search.** Semantic recall is a component — Chronicler uses YantrikDB for embedding-based retrieval — but the tier contract, ACLs, replay harness, and anti-confab clause sit on top. You can implement the pattern with any memory store.

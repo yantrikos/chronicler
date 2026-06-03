@@ -25,7 +25,13 @@ import type {
 
 export interface ScanInput {
   character_id: string;
+  /** @deprecated Single world id kept for back-compat. Pass world_ids
+   *  for multi-world support. */
   world_id?: string;
+  /** All worlds the character belongs to. Each world's namespace
+   *  (`lorebook:<world_id>`) is unioned with the character's private
+   *  lorebook; entries are deduped by rid. */
+  world_ids?: string[];
   /** Concatenated recent messages to scan for trigger keywords. */
   recent_text: string;
 }
@@ -41,8 +47,11 @@ export async function scanLorebook(
   client: YantrikClient,
   input: ScanInput
 ): Promise<ActivatedEntry[]> {
+  const worldIds = new Set<string>();
+  if (input.world_id) worldIds.add(input.world_id);
+  for (const w of input.world_ids ?? []) worldIds.add(w);
   const namespaces = [`lorebook:${input.character_id}`];
-  if (input.world_id) namespaces.push(`lorebook:${input.world_id}`);
+  for (const w of worldIds) namespaces.push(`lorebook:${w}`);
 
   const batches = await Promise.all(
     namespaces.map((ns) =>

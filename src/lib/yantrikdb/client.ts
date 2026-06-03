@@ -299,6 +299,19 @@ export class YantrikClient {
    * empty query with a large top_k; YantrikDB treats that as "list all in
    * namespace" in practice.
    */
+  /** Patch metadata on an existing memory. Used by features that need
+   *  to mutate state (preference state machine, skill outcomes, etc.)
+   *  without overwriting the text or losing history. Non-fatal on
+   *  failure — the substrate is best-effort for these write paths. */
+  async updateMemoryMetadata(
+    rid: string,
+    patch: Record<string, unknown>
+  ): Promise<void> {
+    await this.transport
+      .call("memory", { action: "update_metadata", rid, metadata_patch: patch })
+      .catch(() => undefined);
+  }
+
   async listMemoriesInNamespace(
     namespace: string,
     limit: number = 150
@@ -402,6 +415,80 @@ export class YantrikClient {
       "temporal",
       namespace ? { action: "upcoming", namespace } : { action: "upcoming" }
     );
+  }
+
+  /** Open threads — memory-grounded narrative continuity items. Returns a
+   *  normalized list (kind, text, source rid, importance, last_seen_at,
+   *  entities) for the ThreadsInspector. Falls back to empty on any
+   *  parse / transport failure; the UI is best-effort. */
+  async listThreads(
+    namespace: string | undefined,
+    kind: "upcoming" | "stale",
+    opts: { days?: number; limit?: number } = {}
+  ): Promise<
+    Array<{
+      id: string;
+      kind: "upcoming" | "stale";
+      text: string;
+      rid?: string;
+      importance?: number;
+      last_seen_at?: string;
+      entities?: string[];
+    }>
+  > {
+    try {
+      const args: Record<string, unknown> = {
+        action: kind,
+        days: opts.days ?? (kind === "stale" ? 14 : 30),
+        limit: opts.limit ?? 25,
+      };
+      if (namespace) args.namespace = namespace;
+      const res = await this.transport.call("temporal", args);
+      const parsed = parseMaybeWrapped(res);
+      const items = Array.isArray(parsed)
+        ? parsed
+        : ((parsed as Record<string, unknown>)?.memories as unknown[]) ??
+          ((parsed as Record<string, unknown>)?.results as unknown[]) ??
+          [];
+      if (!Array.isArray(items)) return [];
+      return (items as Array<Record<string, unknown>>)
+        .map((m) => {
+          const text = String(m.text ?? m.content ?? "").trim();
+          if (!text) return null;
+          const rid = m.rid ? String(m.rid) : undefined;
+          const meta = (m.metadata as Record<string, unknown> | undefined) ?? {};
+          const entitiesRaw = meta.entities ?? meta.linked_entities;
+          const entities = Array.isArray(entitiesRaw)
+            ? entitiesRaw.map((e) => String(e)).filter(Boolean).slice(0, 6)
+            : undefined;
+          return {
+            // Stable id when rid is missing — fold the text into a short
+            // ascii digest so dismissals survive page reloads.
+            id:
+              rid ??
+              `temp-${kind}-${text
+                .slice(0, 80)
+                .replace(/[^a-z0-9]+/gi, "_")
+                .toLowerCase()
+                .slice(0, 48)}`,
+            kind,
+            text,
+            rid,
+            importance:
+              typeof m.importance === "number" ? m.importance : undefined,
+            last_seen_at:
+              typeof m.last_accessed_at === "string"
+                ? m.last_accessed_at
+                : typeof meta.last_seen_at === "string"
+                ? meta.last_seen_at
+                : undefined,
+            entities,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+    } catch {
+      return [];
+    }
   }
 
   /** Pending triggers. YantrikDB returns:
@@ -547,6 +634,133 @@ export class YantrikClient {
     await this.transport
       .call("conflict", { action: "resolve", conflict_id: id, strategy })
       .catch(() => undefined);
+  }
+
+  // ============================================================
+  // Skill substrate — YantrikDB's structured catalog of learned
+  // behaviors. See docs/PATTERN.md "Skills: the learning loop"
+  // for the architecture. Chronicler is one of several consumers
+  // (yantrikdb-hermes-plugin, Lane B SDK, WisePick).
+  //
+  // skill_id format: dot-separated lowercase. Chronicler uses
+  // <character_id>.<area>.<verb_phrase> as convention.
+  // applies_to: lowercase_underscore identifiers, no hyphens.
+  // ============================================================
+
+  async skillDefine(opts: {
+    skill_id: string;
+    body: string;
+    skill_type: "procedure" | "reference" | "lesson" | "pattern" | "rule";
+    applies_to: string[];
+    triggers?: string[];
+    on_conflict?: "reject" | "replace";
+    version?: string;
+    supersedes?: string;
+  }): Promise<unknown> {
+    return this.transport.call("skill", {
+      action: "define",
+      ...opts,
+      on_conflict: opts.on_conflict ?? "replace",
+    });
+  }
+
+  async skillSurface(
+    query: string,
+    opts: { applies_to?: string[]; top_k?: number } = {}
+  ): Promise<
+    Array<{
+      skill_id: string;
+      body: string;
+      skill_type: string;
+      applies_to: string[];
+      score?: number;
+      success_rate?: number;
+      uses?: number;
+    }>
+  > {
+    try {
+      const res = await this.transport.call("skill", {
+        action: "surface",
+        query,
+        applies_to: opts.applies_to,
+        top_k: opts.top_k ?? 5,
+      });
+      const parsed = parseMaybeWrapped(res);
+      if (Array.isArray(parsed)) return parsed as any[];
+      if (parsed && typeof parsed === "object") {
+        const o = parsed as Record<string, unknown>;
+        if (Array.isArray(o.skills)) return o.skills as any[];
+        if (Array.isArray(o.results)) return o.results as any[];
+      }
+    } catch {
+      // non-fatal — orchestrator continues without skills
+    }
+    return [];
+  }
+
+  async skillOutcome(
+    skill_id: string,
+    succeeded: boolean,
+    note?: string
+  ): Promise<void> {
+    await this.transport
+      .call("skill", { action: "outcome", skill_id, succeeded, note })
+      .catch(() => undefined);
+  }
+
+  async skillGet(skill_id: string): Promise<{
+    skill_id: string;
+    body: string;
+    skill_type: string;
+    applies_to: string[];
+    outcomes?: Array<{ succeeded: boolean; note?: string; at?: string }>;
+  } | null> {
+    try {
+      const res = await this.transport.call("skill", {
+        action: "get",
+        skill_id,
+      });
+      const parsed = parseMaybeWrapped(res);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const o = parsed as Record<string, unknown>;
+        if (o.error) return null;
+        return o as any;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
+  async skillList(opts: {
+    applies_to?: string[];
+    skill_type?: string;
+    limit?: number;
+  } = {}): Promise<
+    Array<{
+      skill_id: string;
+      body: string;
+      skill_type: string;
+      applies_to: string[];
+    }>
+  > {
+    try {
+      const res = await this.transport.call("skill", {
+        action: "list",
+        applies_to: opts.applies_to,
+        skill_type: opts.skill_type,
+        limit: opts.limit ?? 100,
+      });
+      const parsed = parseMaybeWrapped(res);
+      if (Array.isArray(parsed)) return parsed as any[];
+      if (parsed && typeof parsed === "object") {
+        const o = parsed as Record<string, unknown>;
+        if (Array.isArray(o.skills)) return o.skills as any[];
+      }
+    } catch {
+      // ignore
+    }
+    return [];
   }
 
   async personalityGet(characterId: string): Promise<unknown> {

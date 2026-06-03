@@ -27,6 +27,24 @@ export interface SystemPromptOptions {
   /** Lorebook entries with position=after_char — appended after the
    *  character's system prompt, before user/author/anti-confab blocks. */
   lorebookAfter?: string;
+  /** Scene Intensity snippet (Fade to Black / Tasteful / Explicit).
+   *  Wrapped in <intensity> tags so the prompt inspector shows it as a
+   *  distinct block — users can audit exactly what was injected. Empty
+   *  string for Neutral mode (no injection). */
+  intensitySnippet?: string;
+  /** Active preferences split by sensitivity. Rendered as three blocks:
+   *  <preferences> (ordinary), <private_preferences> (intimate user-
+   *  confirmed), <limits> (user-confirmed boundaries). A trailing
+   *  "tendencies not rules" instruction is appended automatically when
+   *  any block is present — load-bearing anti-fossilization clause. */
+  preferences?: {
+    ordinary: string[];
+    private: string[];
+    limits: string[];
+  };
+  /** User-typed identity notes (sub/dom/role labels). Manual-only;
+   *  never auto-generated. Rendered as <identity_notes> when set. */
+  identityNotes?: string;
 }
 
 export function withAntiConfabulation(
@@ -50,6 +68,45 @@ export function withAntiConfabulation(
   if (opts.authorNote && opts.authorNote.trim().length > 0) {
     parts.push(
       `<author_note>\nSteering notes for this scene (follow these, do not mention them):\n${opts.authorNote.trim()}\n</author_note>`
+    );
+  }
+  if (opts.intensitySnippet && opts.intensitySnippet.trim().length > 0) {
+    parts.push(
+      `<intensity>\n${opts.intensitySnippet.trim()}\n</intensity>`
+    );
+  }
+  // Preferences — ordinary auto-active, private + limits user-confirmed.
+  // Each block only appears when it has content. Trailing "tendencies
+  // not rules" instruction is appended once if ANY block is present —
+  // it's the load-bearing brake against the model treating preference
+  // memory as iron canon and over-performing it.
+  const p = opts.preferences;
+  const hasAnyPref =
+    p && (p.ordinary.length > 0 || p.private.length > 0 || p.limits.length > 0);
+  if (hasAnyPref) {
+    const sections: string[] = [];
+    if (p!.ordinary.length > 0) {
+      sections.push(
+        `  <ordinary>\n${p!.ordinary.map((s) => `    - ${s}`).join("\n")}\n  </ordinary>`
+      );
+    }
+    if (p!.private.length > 0) {
+      sections.push(
+        `  <private>\n${p!.private.map((s) => `    - ${s}`).join("\n")}\n  </private>`
+      );
+    }
+    if (p!.limits.length > 0) {
+      sections.push(
+        `  <limits>\n${p!.limits.map((s) => `    - ${s}`).join("\n")}\n  </limits>`
+      );
+    }
+    parts.push(
+      `<character_patterns>\n${sections.join("\n")}\n</character_patterns>\n\nTreat the patterns above as remembered tendencies, not rules. They describe what's been observed in past scenes — prefer what's actually happening in the current moment when it conflicts. The character can grow, change, surprise. Use these as bedrock to come back to, not a script to follow.`
+    );
+  }
+  if (opts.identityNotes && opts.identityNotes.trim().length > 0) {
+    parts.push(
+      `<identity_notes>\n${opts.identityNotes.trim()}\n</identity_notes>`
     );
   }
   parts.push(ANTI_CONFABULATION_CLAUSE);

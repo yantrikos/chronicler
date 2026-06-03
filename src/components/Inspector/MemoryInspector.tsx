@@ -12,6 +12,12 @@ export interface InspectorMemory {
   created_at?: string;
   namespace?: string;
   source_turn_id?: string;
+  /** Provenance from YantrikDB's recall — populated for memories that
+   *  surfaced in the most recent turn's retrieval (per-turn recalls
+   *  annotate every result with why_retrieved hints like "entity:Mara",
+   *  "query_match:0.84", "tier:canon"). Absent for memories not in the
+   *  last retrieval; ordered most-informative first by the substrate. */
+  why_retrieved?: string[];
 }
 
 interface Props {
@@ -133,6 +139,21 @@ export function MemoryInspector({
               )}
               {m.text}
             </p>
+            {m.why_retrieved && m.why_retrieved.length > 0 && (
+              <div
+                className="mt-1.5 flex flex-wrap gap-1"
+                title="Why YantrikDB surfaced this memory in the last turn's retrieval"
+              >
+                {m.why_retrieved.slice(0, 4).map((w) => (
+                  <span
+                    key={w}
+                    className="text-[10px] font-mono text-emerald-300/80 bg-emerald-900/20 border border-emerald-700/30 rounded px-1 py-0"
+                  >
+                    {w}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="mt-2 flex gap-1.5 items-center">
               {m.tier !== "canon" && onPromote && (
                 <button

@@ -1,7 +1,7 @@
 {
   "name": "chronicler",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "build:icons": "node scripts/generate-icons.mjs",
-    "test": "tsx tests/three-day-continuity.test.ts && tsx tests/auto-promote.test.ts && tsx tests/extract.test.ts && tsx tests/secret-stays-private.test.ts && tsx tests/session-replay.test.ts && tsx tests/lorebook.test.ts",
+    "test": "tsx tests/three-day-continuity.test.ts && tsx tests/auto-promote.test.ts && tsx tests/extract.test.ts && tsx tests/secret-stays-private.test.ts && tsx tests/session-replay.test.ts && tsx tests/lorebook.test.ts && tsx tests/skill-former.test.ts && tsx tests/skill-outcomes.test.ts && tsx tests/lcdb-v0.test.ts && tsx tests/slash.test.ts && tsx tests/arcs.test.ts && tsx tests/relationship-drift.test.ts && tsx tests/preference-former.test.ts",
     "test:integration": "tsx tests/mcp-connectivity.test.ts"
   },
   "dependencies": {

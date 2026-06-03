@@ -18,9 +18,19 @@ interface StoredMemory {
   created_at: string;
 }
 
+interface StoredSkill {
+  skill_id: string;
+  body: string;
+  skill_type: string;
+  applies_to: string[];
+  outcomes: Array<{ succeeded: boolean; note?: string; at: string }>;
+  state: string;
+}
+
 export class InMemoryTransport implements YantrikDBTransport {
   private mems: StoredMemory[] = [];
   private rid = 0;
+  private skills = new Map<string, StoredSkill>();
 
   async call(tool: string, args: Record<string, unknown>): Promise<unknown> {
     switch (tool) {
@@ -62,6 +72,8 @@ export class InMemoryTransport implements YantrikDBTransport {
         }
         return { result: JSON.stringify({ status: "ok" }) };
       }
+      case "skill":
+        return this.skill(args);
       case "session":
       case "graph":
       case "think":
@@ -77,6 +89,98 @@ export class InMemoryTransport implements YantrikDBTransport {
       default:
         return { result: JSON.stringify({ status: "ok" }) };
     }
+  }
+
+  private skill(args: Record<string, unknown>): unknown {
+    const action = String(args.action ?? "");
+    if (action === "define") {
+      const skill_id = String(args.skill_id ?? "");
+      if (!skill_id) {
+        return { result: JSON.stringify({ error: "missing skill_id" }) };
+      }
+      const existing = this.skills.get(skill_id);
+      const on_conflict = String(args.on_conflict ?? "replace");
+      if (existing && on_conflict === "reject") {
+        return {
+          result: JSON.stringify({ error: "skill exists", skill_id }),
+        };
+      }
+      this.skills.set(skill_id, {
+        skill_id,
+        body: String(args.body ?? ""),
+        skill_type: String(args.skill_type ?? "pattern"),
+        applies_to: Array.isArray(args.applies_to)
+          ? (args.applies_to as string[])
+          : [],
+        outcomes: existing?.outcomes ?? [],
+        state: existing?.state ?? "candidate",
+      });
+      return { result: JSON.stringify({ status: "defined", skill_id }) };
+    }
+    if (action === "surface") {
+      const query = String(args.query ?? "").toLowerCase();
+      const wanted = Array.isArray(args.applies_to)
+        ? new Set((args.applies_to as string[]).map((s) => s.toLowerCase()))
+        : null;
+      const top_k = Number(args.top_k ?? 5);
+      const out = [...this.skills.values()]
+        .filter((s) => {
+          if (!wanted) return true;
+          return s.applies_to.some((a) => wanted.has(a.toLowerCase()));
+        })
+        .map((s) => ({
+          skill_id: s.skill_id,
+          body: s.body,
+          skill_type: s.skill_type,
+          applies_to: s.applies_to,
+          score: score(query, s.body),
+          uses: s.outcomes.length,
+          success_rate: s.outcomes.length
+            ? s.outcomes.filter((o) => o.succeeded).length / s.outcomes.length
+            : 0,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, top_k);
+      return { result: JSON.stringify({ skills: out }) };
+    }
+    if (action === "outcome") {
+      const s = this.skills.get(String(args.skill_id ?? ""));
+      if (s) {
+        s.outcomes.push({
+          succeeded: args.succeeded === true,
+          note: args.note ? String(args.note) : undefined,
+          at: new Date().toISOString(),
+        });
+      }
+      return { result: JSON.stringify({ status: "recorded" }) };
+    }
+    if (action === "get") {
+      const s = this.skills.get(String(args.skill_id ?? ""));
+      if (!s) {
+        return { result: JSON.stringify({ error: "not found" }) };
+      }
+      return { result: JSON.stringify(s) };
+    }
+    if (action === "list") {
+      const wanted = Array.isArray(args.applies_to)
+        ? new Set((args.applies_to as string[]).map((s) => s.toLowerCase()))
+        : null;
+      const skillType = args.skill_type ? String(args.skill_type) : null;
+      const limit = Number(args.limit ?? 100);
+      const out = [...this.skills.values()]
+        .filter((s) => (skillType ? s.skill_type === skillType : true))
+        .filter((s) =>
+          !wanted ? true : s.applies_to.some((a) => wanted.has(a.toLowerCase()))
+        )
+        .slice(0, limit);
+      return { result: JSON.stringify({ skills: out }) };
+    }
+    return { result: JSON.stringify({ status: "ok" }) };
+  }
+
+  // For tests
+  skillsAll(): StoredSkill[] {
+    return [...this.skills.values()];
   }
 
   private remember(args: Record<string, unknown>): unknown {

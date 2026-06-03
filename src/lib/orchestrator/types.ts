@@ -26,13 +26,32 @@ export interface PromptCapture {
     messages: number;
     total: number;
   };
+  /** Per-segment token breakdown from the composer, for the budget bar in
+   *  the PromptInspector. `total` here is the sum of the composed sections
+   *  (canon + scene + heuristic + graph), distinct from the overall prompt
+   *  total which also includes anti-confabulation framing + lorebook etc. */
+  breakdown?: TokenUsage;
+  /** The full token budget for this turn (allocation ceiling per section).
+   *  Lets the visualizer show "used vs budgeted" per slot. */
+  budget?: TokenBudget;
+  /** Which composer sections got truncated this turn (i.e. tried to fit
+   *  more than the budget allowed and dropped items). UI flags them with
+   *  a warning glyph so users know context was lost. */
+  truncated_sections?: Array<"canon" | "scene" | "heuristic" | "graph">;
   captured_at: string;
 }
 
 export interface Character {
   id: string;
   name: string;
+  /** @deprecated Single-world field kept for back-compat. New code should
+   *  read world_ids; loadCharacters() migrates legacy data so this can be
+   *  empty in fresh installs. */
   world_id?: string;
+  /** All worlds this character belongs to. Lorebook scanner unions every
+   *  world's namespace with the character's own. Empty / undefined = no
+   *  shared worldbooks, only the character's private lorebook applies. */
+  world_ids?: string[];
   /** Data URL of the card's avatar image, when known. */
   avatar_url?: string;
   description?: string;
@@ -69,8 +88,19 @@ export interface ComposedContext {
   graph_neighborhood: RecallResult[];
   active_temporal_triggers: string[]; // narrative beats
   pending_conflicts_count: number; // shown in sidebar, not injected
+  /** Skills that survived state filtering and made it into the prompt.
+   *  Tracked here so the outcome loop can score them post-turn. */
+  surfaced_skills: Array<{
+    skill_id: string;
+    body: string;
+    skill_type: string;
+  }>;
   token_budget: TokenBudget;
   token_usage: TokenUsage;
+  /** Composer sections that hit their budget cap and had to drop items.
+   *  Surfaced by the PromptInspector budget bar so users can see when
+   *  context was lost. */
+  truncated_sections: Array<"canon" | "scene" | "heuristic" | "graph">;
 }
 
 export interface TokenBudget {
