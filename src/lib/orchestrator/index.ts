@@ -16,6 +16,7 @@ import type { Extractor } from "./extract";
 import { assertParticipant, sceneVisibleTo, type Scene } from "./scene";
 import { scanLorebook, partitionByPosition } from "./lorebook";
 import type { SkillState } from "../instrumentation/skill-transition-log";
+import { runToolLoop, type ToolInvocation } from "./tool-loop";
 
 export interface OrchestratorDeps {
   client: YantrikClient;
@@ -43,6 +44,11 @@ export interface OrchestratorDeps {
    *  modify the turn. Hook errors are isolated — a misbehaving plugin
    *  cannot break the turn. */
   grimoire?: import("../grimoire/host").PluginHost;
+  /** Optional MCP server registry. When set, registered+initialized
+   *  servers' tools are exposed to the model via OpenAI tools format;
+   *  tool calls execute through the registry and results re-feed into
+   *  the conversation. See tool-loop.ts for the iteration semantics. */
+  mcpRegistry?: import("../mcp/registry").McpServerRegistry;
 }
 
 export class Orchestrator {
@@ -92,6 +98,9 @@ export class Orchestrator {
     prompted_skill_ids: string[];
     token_usage: number;
     writes_promise: Promise<void>;
+    /** Tool invocations executed this turn (empty when no MCP tools
+     *  fired). Caller renders them inline in chat + logs to inspector. */
+    tool_invocations: ToolInvocation[];
   }> {
     if (scene) assertParticipant(scene, req.speaker);
     const t0 = performance.now();
@@ -211,7 +220,25 @@ export class Orchestrator {
       sampling: this.deps.sampling,
     };
     let reply: { content: string };
-    if (opts?.onChunk && this.deps.provider.stream) {
+    let toolInvocations: ToolInvocation[] = [];
+    const mcpRegistry = this.deps.mcpRegistry;
+    const hasTools = mcpRegistry
+      ? mcpRegistry.list().some((s) => s.enabled && mcpRegistry.getCatalog(s.id))
+      : false;
+    if (hasTools && mcpRegistry) {
+      // Tool-calling path: drive the iteration loop. We don't stream
+      // through this path because tool-call detection needs the full
+      // response object — streaming would force per-chunk parsing.
+      // Streaming is preserved for the no-tools path (most turns).
+      const loopResult = await runToolLoop(this.deps.provider, mcpRegistry, chatReq);
+      reply = { content: loopResult.content };
+      toolInvocations = loopResult.invocations;
+      if (loopResult.truncated) {
+        console.warn(
+          `[orchestrator] tool loop hit iteration cap (${toolInvocations.length} calls executed)`
+        );
+      }
+    } else if (opts?.onChunk && this.deps.provider.stream) {
       // Streaming path: accumulate chunks and emit them to the UI.
       let acc = "";
       for await (const chunk of this.deps.provider.stream(chatReq)) {
@@ -300,6 +327,7 @@ export class Orchestrator {
       prompted_skill_ids: composed.surfaced_skills.map((s) => s.skill_id),
       token_usage: composed.token_usage.total,
       writes_promise,
+      tool_invocations: toolInvocations,
     };
   }
 }

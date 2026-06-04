@@ -71,6 +71,7 @@ import { PluginHost } from "./lib/grimoire/host";
 import { LocalStorageBackend } from "./lib/grimoire/sdk-runtime";
 import { loadInTreePlugins } from "./lib/grimoire/loader";
 import { McpServerRegistry } from "./lib/mcp/registry";
+import type { ToolInvocation } from "./lib/orchestrator/tool-loop";
 import {
   SkillOutcomeTracker,
   type SkillObservation,
@@ -680,6 +681,7 @@ function App() {
           skillOverridesRef.current.get(skill_id) ??
           skillStateRef.current.get(skill_id),
         grimoire: grimoireHostRef.current ?? undefined,
+        mcpRegistry: mcpRegistryRef.current,
       }),
     [turns, config, grimoireSlashCommands]
   );
@@ -1511,6 +1513,37 @@ function App() {
     return buckets;
   }
 
+  function safeJson(v: unknown): string {
+    try {
+      return JSON.stringify(v, null, 2);
+    } catch {
+      return String(v);
+    }
+  }
+
+  /** Render an MCP tool invocation as a chat-bubble markdown block. The
+   *  format is intentionally compact: the qualified tool name + a result
+   *  preview. Image/audio results use markdown so the existing renderer
+   *  picks them up. */
+  function renderToolInvocation(inv: ToolInvocation): string {
+    const headline = `🔧 **${inv.qualifiedName}** _(${inv.durationMs}ms)_`;
+    const argLine = Object.keys(inv.args).length > 0
+      ? `\n\n\`\`\`json\n${JSON.stringify(inv.args, null, 2)}\n\`\`\``
+      : "";
+    switch (inv.result.kind) {
+      case "text":
+        return `${headline}${argLine}\n\n${inv.result.text}`;
+      case "image":
+        return `${headline}${argLine}\n\n![${inv.toolName}](${inv.result.url})`;
+      case "audio":
+        return `${headline}${argLine}\n\n[audio: ${inv.result.url}](${inv.result.url})`;
+      case "json":
+        return `${headline}${argLine}\n\n\`\`\`json\n${safeJson(inv.result.data)}\n\`\`\``;
+      case "error":
+        return `${headline}${argLine}\n\n⚠ ${inv.result.message}`;
+    }
+  }
+
   function loadIdentityNotes(characterId: string): string {
     let cached = identityNotesRef.current.get(characterId);
     if (cached !== undefined) return cached;
@@ -2168,7 +2201,7 @@ function App() {
     setThinking(true);
     setStreamingText("");
     try {
-      const { assistant_turn, writes_promise, prompted_skill_ids, retrieval } = await orchestrator.turn(
+      const { assistant_turn, writes_promise, prompted_skill_ids, retrieval, tool_invocations } = await orchestrator.turn(
         {
           session_id: sessionId,
           user_id: "user",
@@ -2189,6 +2222,21 @@ function App() {
         }
       );
       setLastPromptCapture(orchestrator.getLastPromptCapture());
+      // Surface MCP tool invocations as synthetic system turns so the
+      // user sees what the character invoked. One bubble per call with
+      // server::tool name + result preview. Renders BEFORE the assistant
+      // reply since calls happened first.
+      if (tool_invocations.length > 0) {
+        const toolBubbles: ChatTurn[] = tool_invocations.map((inv) => ({
+          id: crypto.randomUUID(),
+          role: "system",
+          speaker: "system:tool",
+          content: renderToolInvocation(inv),
+          created_at: new Date().toISOString(),
+          session_id: sessionId,
+        }));
+        setTurns((prev) => [...prev, ...toolBubbles]);
+      }
       // Capture why_retrieved hints from this turn's recalls so the
       // memory inspector can show provenance badges. Merge into the
       // existing map rather than replacing — older recall hints stay

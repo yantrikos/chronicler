@@ -10,8 +10,39 @@
 // upstream call and streams the response back (SSE passes through).
 
 export interface ChatMessage {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
+  /** When role is "assistant" and the model emitted tool calls, the
+   *  provider populates this. Reflected back in follow-up requests so
+   *  the LLM has continuity. Format follows OpenAI's tool-calling spec. */
+  tool_calls?: ChatToolCall[];
+  /** When role is "tool", the id of the assistant's tool_call this
+   *  message satisfies. */
+  tool_call_id?: string;
+  /** Optional metadata for tools — display name + provider id. The
+   *  orchestrator stashes this here when re-injecting tool messages so
+   *  the chat UI can render attribution. */
+  tool_name?: string;
+}
+
+export interface ChatToolCall {
+  id: string;
+  /** Always "function" in OpenAI's spec. Reserved for future expansion. */
+  type: "function";
+  function: {
+    name: string;
+    /** JSON-encoded arguments string per the OpenAI spec. */
+    arguments: string;
+  };
+}
+
+export interface ChatToolDef {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters?: unknown; // JSON Schema
+  };
 }
 
 export interface SamplingOptions {
@@ -29,10 +60,20 @@ export interface ChatRequest {
   max_tokens?: number;
   temperature?: number;
   sampling?: SamplingOptions;
+  /** OpenAI-compatible tool definitions. When set, the provider sends
+   *  them as the `tools` field. Most providers (OpenAI, Ollama,
+   *  OpenRouter, nano-gpt, Anthropic-via-compat) honor this. */
+  tools?: ChatToolDef[];
+  /** Optional tool_choice — "auto" (default), "none", or a specific
+   *  tool name. Reserved; defaults to "auto" when tools is set. */
+  tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
 }
 
 export interface ChatResponse {
   content: string;
+  /** Populated when the model emitted tool calls. Empty when the model
+   *  produced a normal text reply. */
+  tool_calls?: ChatToolCall[];
   usage?: { prompt_tokens: number; completion_tokens: number };
 }
 
@@ -104,16 +145,33 @@ export class OpenAICompatProvider implements LlmProvider {
 
   private buildBody(req: ChatRequest, streaming: boolean) {
     const s = req.sampling ?? {};
+    // Serialize messages per the OpenAI chat-completions spec. Tool
+    // messages need {role: "tool", content, tool_call_id}; assistant
+    // messages may include {tool_calls: [...]} when reflecting prior
+    // calls back so the model has continuity across loop iterations.
+    const messages = req.messages.map((m) => {
+      const base: Record<string, unknown> = { role: m.role, content: m.content };
+      if (m.tool_calls && m.tool_calls.length > 0) base.tool_calls = m.tool_calls;
+      if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
+      return base;
+    });
     return {
       model: req.model,
       messages: [
         { role: "system" as const, content: req.system },
-        ...req.messages,
+        ...messages,
       ],
       temperature: s.temperature ?? req.temperature ?? 0.9,
       top_p: s.top_p,
       max_tokens: req.max_tokens ?? 1024,
       ...(streaming ? { stream: true } : {}),
+      // OpenAI-style tool calling. Most providers (OpenAI, Ollama,
+      // OpenRouter, nano-gpt, Anthropic-via-compat) honor this; ones
+      // that don't ignore the field and the model produces a normal
+      // text reply.
+      ...(req.tools && req.tools.length > 0
+        ? { tools: req.tools, tool_choice: req.tool_choice ?? "auto" }
+        : {}),
       // Ollama + Qwen3 respect `think: false` to skip the reasoning phase.
       // Ignored by providers that don't know about it.
       ...(this.disableThinking ? { think: false } : {}),
@@ -149,8 +207,29 @@ export class OpenAICompatProvider implements LlmProvider {
       (typeof msg.content === "string" && msg.content.length > 0)
         ? msg.content
         : (typeof msg.reasoning === "string" ? msg.reasoning : "");
+    // Parse OpenAI-format tool_calls when present. Models that don't
+    // emit tool calls omit the field; we leave it undefined so callers
+    // can `if (resp.tool_calls?.length)` cleanly.
+    let tool_calls: ChatToolCall[] | undefined;
+    if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+      tool_calls = msg.tool_calls
+        .filter((tc: unknown): tc is Record<string, unknown> => !!tc && typeof tc === "object")
+        .map((tc: Record<string, unknown>) => {
+          const fn = (tc.function ?? {}) as Record<string, unknown>;
+          return {
+            id: String(tc.id ?? crypto.randomUUID()),
+            type: "function" as const,
+            function: {
+              name: String(fn.name ?? ""),
+              arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
+            },
+          };
+        })
+        .filter((tc: ChatToolCall) => tc.function.name.length > 0);
+    }
     return {
       content,
+      tool_calls,
       usage: data?.usage
         ? {
             prompt_tokens: data.usage.prompt_tokens,
