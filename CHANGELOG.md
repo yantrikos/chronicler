@@ -2,6 +2,70 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.2.1] — 2026-06-03 — Grimoire substrate (Phase 10 iteration, not the public ship)
+
+Substrate work on the Phase 10 extension platform. The plumbing landed: typed plugin host, four contribution surfaces, MCP server registration, tool calling end-to-end with per-character gating, four first-party Grimoire entries. The **experience** isn't there yet — no out-of-tree install, no testing harness, no CLI scaffold, no community plugins exist. This is iteration toward the actual Grimoire ship at 0.3.0; tagged as 0.2.1 to keep the version namespace honest.
+
+### Grimoire foundation (commit 3bea4a8)
+
+- **Typed plugin platform**. Plugins live in `src/plugins/<id>/` with a `grimoire.json` manifest; loaded at boot via Vite's `import.meta.glob` with HMR for hot reload.
+- **Four contribution surfaces wired**:
+  - Hooks at 7 orchestrator lifecycle points with three flavors (observer / augmenter / strategy). Errors isolated per plugin; augmenter/strategy throws auto-disable until next launch.
+  - Slash commands with `/`-prefix autocomplete in chat input; results render as synthetic system turns. Plugin-to-plugin invocation routes through the host with the target plugin's permissions.
+  - UI slots (typed `SlotPropMap` for `inspector:tab` + `chat:input:toolbar` + `settings:section`). Plugin tabs render in the inspector strip with violet underlines.
+  - MCP server registration (substrate; tool calling shipped in 9dd42cb below).
+- **Capabilities** (network / filesystem / llm / memory) declared in manifest and enforced on the SDK-wrapped `api`. Plugins that import raw node modules bypass enforcement — documented as the trust boundary.
+- **Four first-party Grimoire entries**:
+  - `regex-filter` — afterChat observer + settings schema
+  - `transcript-exporter` — afterWrite observer + `/export` slash command + scoped storage + browser-side markdown download
+  - `dice-roller` — `/roll` / `/flip` / `/pick` with full dice notation parsing
+  - `memory-inspector` — `inspector:tab` slot mount with React component (structural demo; live recall path is v0.4)
+
+### MCP server registry + settings UX (commit b9f0fe9)
+
+- **`src/lib/mcp/`** — `types.ts` (`McpServerConfig`, shaped `McpToolCallResult` discriminated union), `external-client.ts` (wraps the official `@modelcontextprotocol/sdk` Client with lazy connect, catalog loading, shaped tool-call results), `registry.ts` (localStorage-persisted configs, lifecycle, subscribe).
+- **Settings UI** (`McpServersSection.tsx`) — add-server form, per-server enable/test/refresh/remove, three-column catalog browser (Tools / Resources / Prompts) with status chips.
+
+### MCP tool calling in the orchestrator turn loop (commit 9dd42cb)
+
+- **`ChatRequest.tools` + `ChatResponse.tool_calls`** in the OpenAI-compat provider; serializes `role: "tool"` messages and `tool_calls` on assistant turns per the OpenAI spec.
+- **`src/lib/orchestrator/tool-loop.ts`** — `collectTools` (qualified names as `serverId__toolName`), `runToolLoop` (3-iteration cap, parallel execution per iteration, OpenAI-spec tool_call_id round-trip), `splitQualified` helper, `formatToolResultForModel` for context shaping.
+- **Orchestrator integration** — `mcpRegistry` optional dep, tool-loop path bypasses streaming (per-iteration full responses needed for `tool_calls` detection).
+- **Chat rendering** — tool invocations become synthetic system turns with 🔧 markdown bubbles; image URLs render as `<img>`, audio as link, JSON as code block, errors get ⚠.
+
+### Per-character MCP tool gating (commit 8b04021)
+
+- **`src/lib/mcp/character-gating.ts`** — localStorage round-trip with `configured: boolean` flag that disambiguates "default allow all" from "explicit deny all"; `resolveAllowedTools()` returns `undefined` for default and a `Set<string>` otherwise.
+- **`CharacterToolGating.tsx`** — checkbox grid in CharacterEditor grouped by server, per-server "all" / "none" buttons, "reset to default" to drop the explicit allowlist.
+- **Defense in depth** — gating filters at both tool-definition collection time (model never sees denied tools) AND at execution time (rejects unlisted tools even if the model hallucinates them).
+
+### Test suite
+
+19/19 test files green:
+- New: `grimoire-host`, `grimoire-slash`, `grimoire-slots`, `mcp-registry`, `mcp-tool-loop`, `character-gating` (40+ new assertions)
+- Existing 13 files all still green
+
+### What 0.2.1 does NOT include (gating 0.3.0 → the real Grimoire ship)
+
+- **No out-of-tree install path**. Plugins live in `src/plugins/`; users can't drop one in `~/.chronicler/plugins/` and have it load. v0.4 work.
+- **No third-party plugins exist**. Only first-party examples.
+- **Memory Inspector plugin is a structural demo**, not a functional inspector. The slot wiring works but live `api.memory` from UI slots isn't plumbed yet.
+- **MCP value is invisible without a server registered**. Users without one see just an empty "Tool servers" section.
+- **No plugin testing harness package** (`@chronicler/grimoire-test`).
+- **No CLI scaffold** (`npx create-chronicler-grimoire`).
+- **No MCP resources as retrieval source** — the `mcp:<server>:<uri>` namespace integration is v0.4.
+- **Preferences-on-reasoning-models** bug from v0.2.0 still open ([saga #52](https://github.com/yantrikos/chronicler)).
+
+### Compared to the field
+
+`docs/COMPARISON.md` cell stays at 🟡 with updated copy reflecting MCP tool calling + per-character gating. The cell flips to ✅ at 0.3.0 when the install path + testing harness + at least one real community plugin ship together.
+
+### Versioning rationale
+
+Strict semver would call this a minor bump (new features, no breaks). Pre-1.0, version numbers are signaling release-readiness more than feature/fix distinction. 0.2.1 keeps 0.3.0 reserved for the launch-worthy Grimoire milestone — substrate iteration shouldn't burn a minor.
+
+---
+
 ## [0.2.0] — 2026-06-03 — Phase 9: Interactive Memory + ST-parity polish
 
 The biggest single release since v0.1. Phase 9 turns verified memory from passive retrieval into a user-steerable, character-visible system: arcs, relationship drift, retrieval provenance, scene intensity, and character preferences ship as five distinct inspector tabs and three new long-memory substrates. Alongside Phase 9, this release bundles ~6 weeks of pre-Phase-9 work that never made it to a tagged release — provider matrix expansion (Gemini, OpenRouter, nano-gpt streaming polish), Story / continue mode, World Info (global lorebooks), Tier B power features (token visualizer, branching, search), and scene presets.

@@ -81,7 +81,7 @@ For a head-to-head comparison against SillyTavern, RisuAI, and AgnAistic, see [d
 | Prompt inspector with token budget + retrieval reasoning | ✅ | 🟡 structure only | 🟡 | ❌ |
 | Group-chat memory ACL (`visible_to`, retrieval-time filter) | ✅ | ❌ prompt-level | ❌ | ❌ |
 | Scene Intensity dropdown (first-class, no jailbreak) | ✅ | ❌ | ❌ | ❌ |
-| Extension ecosystem | 🟡 Grimoire (v0.3 hooks + slash) | ✅ huge | 🟡 | 🟡 |
+| Extension ecosystem | 🟡 Grimoire (v0.2.1 hooks + slash + MCP tools) | ✅ huge | 🟡 | 🟡 |
 
 ---
 
