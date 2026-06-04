@@ -411,12 +411,30 @@ async function handleInstall(req, res) {
     return;
   }
   logInfo(`installing ${gitUrl} → ${target}`);
-  const cloned = await runCommand("git", ["clone", "--depth", "1", gitUrl, target]);
+  // GIT_TERMINAL_PROMPT=0 + GIT_ASKPASS=true: fail immediately if git
+  // would prompt for credentials (private repo, 404, or anything that
+  // returns 401). Without these, git hangs trying to read /dev/tty
+  // which doesn't exist in the container; the resulting error message
+  // is the cryptic "No such device or address".
+  const cloned = await runCommand("git", ["clone", "--depth", "1", gitUrl, target], {
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "/bin/true",
+    },
+  });
   if (cloned.code !== 0) {
+    // Map common git failure modes to actionable error messages.
+    let hint = cloned.stderr.slice(0, 500);
+    if (hint.includes("could not read Username") || hint.includes("Authentication failed")) {
+      hint = `Repo "${gitUrl}" appears to be private or does not exist publicly. Public github repos clone without auth; private ones aren't supported by the install endpoint (clone manually into the mount instead).`;
+    } else if (hint.includes("not found") || hint.includes("Repository not found")) {
+      hint = `Repo "${gitUrl}" was not found. Check the URL.`;
+    }
     res.writeHead(500, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
-        error: `git clone failed (exit ${cloned.code}): ${cloned.stderr.slice(0, 500)}`,
+        error: `git clone failed (exit ${cloned.code}): ${hint}`,
       })
     );
     return;
