@@ -87,6 +87,12 @@ export class Orchestrator {
       };
       /** User-typed identity notes for this character. Manual-only. */
       identityNotes?: string;
+      /** Per-character MCP tool allowlist (qualified names like
+       *  "dice__roll"). When undefined, all enabled tools are exposed.
+       *  When set (even to empty), filters the tools passed to the LLM
+       *  AND rejects execution of unlisted tools (defense in depth).
+       *  See src/lib/mcp/character-gating.ts. */
+      allowedTools?: Set<string>;
       onChunk?: (chunk: string, accumulated: string) => void;
     }
   ): Promise<{
@@ -230,7 +236,9 @@ export class Orchestrator {
       // through this path because tool-call detection needs the full
       // response object — streaming would force per-chunk parsing.
       // Streaming is preserved for the no-tools path (most turns).
-      const loopResult = await runToolLoop(this.deps.provider, mcpRegistry, chatReq);
+      const loopResult = await runToolLoop(this.deps.provider, mcpRegistry, chatReq, {
+        allowedTools: opts?.allowedTools,
+      });
       reply = { content: loopResult.content };
       toolInvocations = loopResult.invocations;
       if (loopResult.truncated) {

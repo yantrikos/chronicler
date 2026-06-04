@@ -73,6 +73,10 @@ import { loadInTreePlugins } from "./lib/grimoire/loader";
 import { McpServerRegistry } from "./lib/mcp/registry";
 import type { ToolInvocation } from "./lib/orchestrator/tool-loop";
 import {
+  loadCharacterGating,
+  resolveAllowedTools,
+} from "./lib/mcp/character-gating";
+import {
   SkillOutcomeTracker,
   type SkillObservation,
   deriveState,
@@ -2218,6 +2222,7 @@ function App() {
           intensitySnippet: effectiveIntensitySnippet(activeIntensityId),
           preferences: derivePromptedPreferences(speakerChar.id),
           identityNotes: loadIdentityNotes(speakerChar.id) || undefined,
+          allowedTools: resolveAllowedTools(loadCharacterGating(speakerChar.id)),
           onChunk: (_chunk, accumulated) => setStreamingText(accumulated),
         }
       );
@@ -2880,6 +2885,7 @@ function App() {
                 character={target}
                 client={clientRef.current}
                 worlds={worlds}
+                mcpRegistry={mcpRegistryRef.current}
                 onOpenLorebook={() => {
                   setLorebookCharacterId(target.id);
                   setEditingCharacterId(null);

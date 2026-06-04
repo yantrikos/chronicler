@@ -14,6 +14,8 @@ import type { Character } from "../../lib/orchestrator/types";
 import type { YantrikClient } from "../../lib/yantrikdb/client";
 import { rememberAsCanon } from "../../lib/yantrikdb/client";
 import type { World } from "../../lib/worlds/store";
+import type { McpServerRegistry } from "../../lib/mcp/registry";
+import { CharacterToolGating } from "./CharacterToolGating";
 
 interface Props {
   character: Character;
@@ -22,6 +24,9 @@ interface Props {
   client?: YantrikClient;
   onOpenLorebook?: () => void;
   worlds?: World[];
+  /** When provided, the editor shows a per-character MCP tool gating
+   *  panel. Omit when MCP isn't configured for this session. */
+  mcpRegistry?: McpServerRegistry;
 }
 
 export function CharacterEditor({
@@ -31,6 +36,7 @@ export function CharacterEditor({
   client,
   onOpenLorebook,
   worlds,
+  mcpRegistry,
 }: Props) {
   const [draft, setDraft] = useState<Character>({ ...character });
 
@@ -233,6 +239,16 @@ export function CharacterEditor({
             </Field>
           )}
         </section>
+
+        {mcpRegistry && (
+          <section className="px-5 py-4 border-t border-neutral-800">
+            <CharacterToolGating
+              characterId={character.id}
+              characterName={draft.name}
+              registry={mcpRegistry}
+            />
+          </section>
+        )}
 
         <footer className="px-5 py-3 border-t border-neutral-800 flex items-center justify-between">
           {onOpenLorebook ? (
