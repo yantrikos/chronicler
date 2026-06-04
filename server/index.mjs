@@ -21,6 +21,10 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  initGrimoirePluginServer,
+  handleGrimoireRequest,
+} from "./grimoire-plugins.mjs";
 
 const PORT = Number(process.env.CHRONICLER_PORT ?? 3001);
 const BIND = process.env.CHRONICLER_BIND ?? "127.0.0.1";
@@ -229,6 +233,9 @@ const server = createServer(async (req, res) => {
   try {
     if (req.url.startsWith("/api/mcp")) return await proxyMcp(req, res);
     if (req.url === "/api/llm") return await proxyLlm(req, res);
+    if (req.url.startsWith("/api/grimoire/")) {
+      if (handleGrimoireRequest(req, res)) return;
+    }
     if (req.url === "/api/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
@@ -252,8 +259,16 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, BIND, () => {
+server.listen(PORT, BIND, async () => {
   console.log(
     `[chronicler-server] listening on http://${BIND}:${PORT}  → mcp=${YANTRIKDB_URL}  dist=${DIST_DIR}`
   );
+  // Bring up the Grimoire out-of-tree plugin loader after the HTTP
+  // server is accepting connections. Failure here is non-fatal — the
+  // app still works, just without external plugins.
+  try {
+    await initGrimoirePluginServer();
+  } catch (e) {
+    console.warn("[grimoire-plugins] init failed:", e);
+  }
 });

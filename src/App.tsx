@@ -70,6 +70,10 @@ import { PreferenceInspector } from "./components/Inspector/PreferenceInspector"
 import { PluginHost } from "./lib/grimoire/host";
 import { LocalStorageBackend } from "./lib/grimoire/sdk-runtime";
 import { loadInTreePlugins } from "./lib/grimoire/loader";
+import {
+  loadOutOfTreePlugins,
+  subscribeToPluginEvents,
+} from "./lib/grimoire/dynamic-loader";
 import { McpServerRegistry } from "./lib/mcp/registry";
 import type { ToolInvocation } from "./lib/orchestrator/tool-loop";
 import {
@@ -720,8 +724,18 @@ function App() {
       } catch (e) {
         console.warn("[grimoire] in-tree loader failed", e);
       }
+      // Load out-of-tree plugins (host's ~/.chronicler/plugins/, mounted
+      // into the container). Non-fatal if the server isn't running or
+      // the mount is empty.
+      try {
+        await loadOutOfTreePlugins(host);
+      } catch (e) {
+        console.warn("[grimoire] out-of-tree initial load failed", e);
+      }
+      const unsubscribePluginEvents = subscribeToPluginEvents(host);
       if (cancelled) {
         unsubscribe();
+        unsubscribePluginEvents();
         return;
       }
       setGrimoireSlashCommands(
@@ -731,16 +745,25 @@ function App() {
         }))
       );
       setGrimoireVersion(host.getVersion());
-      // Tee the unsubscribe so the cleanup function below can call it.
-      (host as unknown as { __unsubscribe?: () => void }).__unsubscribe = unsubscribe;
+      // Tee both unsubscribes so the cleanup function below can call them.
+      (host as unknown as {
+        __unsubscribe?: () => void;
+        __unsubscribePluginEvents?: () => void;
+      }).__unsubscribe = unsubscribe;
+      (host as unknown as {
+        __unsubscribePluginEvents?: () => void;
+      }).__unsubscribePluginEvents = unsubscribePluginEvents;
     })();
     return () => {
       cancelled = true;
       const h = grimoireHostRef.current;
       if (h) {
-        const unsub = (h as unknown as { __unsubscribe?: () => void })
-          .__unsubscribe;
-        if (unsub) unsub();
+        const x = h as unknown as {
+          __unsubscribe?: () => void;
+          __unsubscribePluginEvents?: () => void;
+        };
+        if (x.__unsubscribe) x.__unsubscribe();
+        if (x.__unsubscribePluginEvents) x.__unsubscribePluginEvents();
         void h.unloadAll();
       }
       grimoireHostRef.current = null;

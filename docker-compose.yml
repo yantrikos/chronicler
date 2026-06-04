@@ -50,6 +50,15 @@ services:
       CHRONICLER_BIND: "0.0.0.0"
       CHRONICLER_YANTRIKDB_URL: "http://yantrikdb:8420/mcp"
       CHRONICLER_YANTRIKDB_TOKEN: "${YANTRIKDB_API_KEY:-}"
+      # Out-of-tree Grimoire plugins directory. Drop a plugin folder
+      # (containing grimoire.json + index.ts) into the host path on
+      # the left and it gets picked up automatically with hot reload.
+      CHRONICLER_PLUGINS_DIR: "/data/plugins"
+    volumes:
+      # Host plugin dir → container. Default $HOME/.chronicler/plugins
+      # (read-only mount; the server only reads). Override the host
+      # path with $CHRONICLER_PLUGINS_HOST when launching.
+      - ${CHRONICLER_PLUGINS_HOST:-~/.chronicler/plugins}:/data/plugins:ro
     ports:
       - "127.0.0.1:3001:3001"
 
