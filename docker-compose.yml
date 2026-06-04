@@ -55,10 +55,11 @@ services:
       # the left and it gets picked up automatically with hot reload.
       CHRONICLER_PLUGINS_DIR: "/data/plugins"
     volumes:
-      # Host plugin dir → container. Default $HOME/.chronicler/plugins
-      # (read-only mount; the server only reads). Override the host
-      # path with $CHRONICLER_PLUGINS_HOST when launching.
-      - ${CHRONICLER_PLUGINS_HOST:-~/.chronicler/plugins}:/data/plugins:ro
+      # Host plugin dir → container. Default $HOME/.chronicler/plugins.
+      # Read-write so the in-app "Install" button can git-clone into it;
+      # drop the trailing flag to make it read-only if you only ever
+      # install manually. Override the host path via $CHRONICLER_PLUGINS_HOST.
+      - ${CHRONICLER_PLUGINS_HOST:-~/.chronicler/plugins}:/data/plugins:rw
     ports:
       - "127.0.0.1:3001:3001"
 

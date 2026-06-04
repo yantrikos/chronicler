@@ -6,6 +6,7 @@ import {
   type InspectorMemory,
 } from "./components/Inspector/MemoryInspector";
 import { PromptInspector } from "./components/Inspector/PromptInspector";
+import { BrowseGrimoireModal } from "./components/Grimoire/BrowseModal";
 import {
   ThinkPanel,
   type ThinkConflict,
@@ -284,6 +285,7 @@ function App() {
   const [config, setConfig] = useState<ChroniclerConfig>(defaultConfig);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [promptInspectorOpen, setPromptInspectorOpen] = useState(false);
+  const [browseGrimoireOpen, setBrowseGrimoireOpen] = useState(false);
   const [lastPromptCapture, setLastPromptCapture] =
     useState<PromptCapture | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -3022,6 +3024,13 @@ function App() {
               prompt
             </button>
             <button
+              className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-100 px-2.5 py-1"
+              onClick={() => setBrowseGrimoireOpen(true)}
+              title="Browse + install Grimoire plugins"
+            >
+              grimoire
+            </button>
+            <button
               className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-500 hover:text-neutral-200 w-7 h-7 flex items-center justify-center"
               onClick={() => setHelpOpen(true)}
               title="Keyboard shortcuts (?)"
@@ -3522,6 +3531,9 @@ function App() {
           capture={lastPromptCapture}
           onClose={() => setPromptInspectorOpen(false)}
         />
+      )}
+      {browseGrimoireOpen && (
+        <BrowseGrimoireModal onClose={() => setBrowseGrimoireOpen(false)} />
       )}
       {searchOpen && (
         <ChatSearch

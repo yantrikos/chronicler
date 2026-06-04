@@ -19,6 +19,7 @@ import * as esbuild from "esbuild";
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 const PLUGINS_DIR =
   process.env.CHRONICLER_PLUGINS_DIR ?? "/data/plugins";
@@ -320,6 +321,17 @@ export function handleGrimoireRequest(req, res) {
     return true;
   }
 
+  if (pathname === "/api/grimoire/install" && req.method === "POST") {
+    void handleInstall(req, res);
+    return true;
+  }
+
+  if (pathname.match(/^\/api\/grimoire\/uninstall\/[^/]+$/) && req.method === "POST") {
+    const id = decodeURIComponent(pathname.split("/").pop());
+    void handleUninstall(id, res);
+    return true;
+  }
+
   if (pathname === "/api/grimoire/events" && req.method === "GET") {
     res.writeHead(200, {
       "content-type": "text/event-stream",
@@ -335,6 +347,132 @@ export function handleGrimoireRequest(req, res) {
   }
 
   return false; // not handled — let server fall through
+}
+
+/** POST /api/grimoire/install — body {gitUrl, dirName?}.
+ *  Clones a git URL into <PLUGINS_DIR>/<dirName>. dirName defaults to
+ *  the repo's name stripped of .git suffix. Rejects if PLUGINS_DIR is
+ *  read-only (e.g. the default docker mount). Returns {ok, id} or
+ *  {error}. */
+async function handleInstall(req, res) {
+  let body = "";
+  for await (const chunk of req) body += chunk.toString("utf8");
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const gitUrl = String(payload?.gitUrl ?? "").trim();
+  if (!/^(https?|git|ssh):\/\//.test(gitUrl) && !gitUrl.startsWith("git@")) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "gitUrl must be an http(s)/git/ssh URL" }));
+    return;
+  }
+  // Derive dirName from the URL if not provided.
+  let dirName = String(payload?.dirName ?? "").trim();
+  if (!dirName) {
+    const tail = gitUrl.split("/").pop() ?? "";
+    dirName = tail.replace(/\.git$/, "").trim();
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(dirName)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `dirName "${dirName}" invalid (allowed: a-z A-Z 0-9 _ -)`,
+      })
+    );
+    return;
+  }
+  // Detect read-only mount up front so the failure message is helpful.
+  try {
+    const probePath = path.join(PLUGINS_DIR, ".write-probe");
+    await fs.writeFile(probePath, "");
+    await fs.unlink(probePath);
+  } catch (e) {
+    res.writeHead(403, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `${PLUGINS_DIR} is not writable from the container. Edit docker-compose.yml to drop ':ro' on the volume mount, restart, and retry.`,
+      })
+    );
+    return;
+  }
+  const target = path.join(PLUGINS_DIR, dirName);
+  if (existsSync(target)) {
+    res.writeHead(409, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `plugin directory "${dirName}" already exists; uninstall first or use a different dirName`,
+      })
+    );
+    return;
+  }
+  logInfo(`installing ${gitUrl} → ${target}`);
+  const cloned = await runCommand("git", ["clone", "--depth", "1", gitUrl, target]);
+  if (cloned.code !== 0) {
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `git clone failed (exit ${cloned.code}): ${cloned.stderr.slice(0, 500)}`,
+      })
+    );
+    return;
+  }
+  // chokidar will pick up the new dir; explicit reload to make the
+  // response wait until the manifest is loaded.
+  await reloadOne(dirName);
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: true, id: dirName }));
+}
+
+async function handleUninstall(id, res) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid plugin id" }));
+    return;
+  }
+  const target = path.join(PLUGINS_DIR, id);
+  if (!existsSync(target)) {
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: `plugin "${id}" not installed` }));
+    return;
+  }
+  try {
+    await fs.rm(target, { recursive: true, force: true });
+  } catch (e) {
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `removing ${target} failed: ${e instanceof Error ? e.message : String(e)}`,
+      })
+    );
+    return;
+  }
+  plugins.delete(id);
+  version++;
+  notifyClients();
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: true, id }));
+}
+
+function runCommand(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...opts,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
+    child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
+    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on("error", (err) =>
+      resolve({ code: -1, stdout, stderr: err.message })
+    );
+  });
 }
 
 export function shutdownGrimoirePluginServer() {

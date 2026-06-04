@@ -181,9 +181,40 @@ This means **all your registrations rebind** on every edit. Make sure your `setu
 
 Plugins that throw inside `setup()` get rejected. Plugins whose hooks throw at runtime: observer errors are logged; augmenter/strategy errors auto-disable the plugin for the rest of the session.
 
+## Installing plugins (out-of-tree)
+
+Drop a plugin into `~/.chronicler/plugins/<id>/` on your host machine. Chronicler picks it up at startup with hot reload on file changes.
+
+```bash
+# Install the community Chat Stats plugin
+git clone https://github.com/yantrikos/chronicler-grimoire-stats \
+  ~/.chronicler/plugins/stats
+
+# Restart chronicler (or wait for the file watcher if running dev mode)
+docker compose restart chronicler
+```
+
+How it works:
+1. `docker-compose.yml` mounts `~/.chronicler/plugins/` (override with `CHRONICLER_PLUGINS_HOST`) read-only into the container at `/data/plugins/`.
+2. The server scans that directory at boot. Each subdirectory with a `grimoire.json` manifest gets bundled by esbuild into ESM (TypeScript source supported).
+3. The browser fetches the catalog at `/api/grimoire/plugins`, dynamic-imports each bundle, and registers with the PluginHost.
+4. chokidar watches the directory tree; on file change the affected plugin re-bundles, an SSE event tells the browser, and the bundle re-imports (cache-busted by mtime).
+
+**Author convention:** import the SDK identity helper from `@chronicler/grimoire`:
+
+```typescript
+import { defineGrimoire } from "@chronicler/grimoire";
+export const manifest = { /* ... */ };
+export default defineGrimoire({ id: "...", setup(ctx) { /* ... */ } });
+```
+
+The server's esbuild resolves this via an inline shim — no `npm install` needed for plugin authors. React imports (for `.tsx` slot components) are rewritten to read from chronicler's React instance at runtime, so hooks work correctly across the plugin/host boundary.
+
+**In-tree vs out-of-tree:** plugins under `src/plugins/<id>/` ship bundled with the chronicler app build (Vite HMR for dev). Plugins under `~/.chronicler/plugins/<id>/` are installed independently per-user (esbuild HMR for dev). Both work side-by-side; manifest `id` collisions are rejected at load time.
+
 ## What's NOT in v1
 
-- **Out-of-tree install paths** — for v1, plugins live in `src/plugins/` and ship with the app build. The dynamic loader (drop a folder in `~/.chronicler/plugins/` and it shows up) lands in v2.
+- **One-click install from the Browse Codex modal** — still manual `git clone` into `~/.chronicler/plugins/`. UI wizard is v0.3.
 - **UI slot mounting** — settings sections and inspector tabs work via auto-rendered JSON Schema and the existing inspector tab API. The full slot registry (sidebar panels, message decorations, custom renderers) lands in v1.5.
 - **MCP tool calling in the orchestrator turn loop** — MCP server registration UI lands in v1.5. The substrate (registering servers, listing tools/resources/prompts) is reserved in the manifest.
 - **CLI scaffold** — `npx create-chronicler-grimoire` lands in v2.
