@@ -1,0 +1,48 @@
+{
+  "name": "@chronicler/grimoire",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for authoring Chronicler Grimoire plugins (hooks, slash commands, UI slots, MCP integration)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "chronicler",
+    "grimoire",
+    "plugin",
+    "roleplay",
+    "sdk"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/yantrikos/chronicler/tree/main/packages/grimoire-sdk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yantrikos/chronicler.git",
+    "directory": "packages/grimoire-sdk"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

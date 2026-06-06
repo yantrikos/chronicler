@@ -1,0 +1,13 @@
+{
+  "name": "{{PLUGIN_ID}}",
+  "version": "0.1.0",
+  "description": "{{PLUGIN_DESCRIPTION}}",
+  "type": "module",
+  "main": "index.ts",
+  "author": "{{PLUGIN_AUTHOR}}",
+  "license": "{{PLUGIN_LICENSE}}",
+  "devDependencies": {
+    "@chronicler/grimoire": "^0.1.0",
+    "typescript": "~5.8.3"
+  }
+}

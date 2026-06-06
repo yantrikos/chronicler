@@ -82,6 +82,10 @@ import {
   resolveAllowedTools,
 } from "./lib/mcp/character-gating";
 import {
+  loadCharacterResourceOptIn,
+  resolveEnabledResources,
+} from "./lib/mcp/resource-opt-in";
+import {
   SkillOutcomeTracker,
   type SkillObservation,
   deriveState,
@@ -2248,6 +2252,9 @@ function App() {
           preferences: derivePromptedPreferences(speakerChar.id),
           identityNotes: loadIdentityNotes(speakerChar.id) || undefined,
           allowedTools: resolveAllowedTools(loadCharacterGating(speakerChar.id)),
+          mcpEnabledResources: resolveEnabledResources(
+            loadCharacterResourceOptIn(speakerChar.id)
+          ),
           onChunk: (_chunk, accumulated) => setStreamingText(accumulated),
         }
       );

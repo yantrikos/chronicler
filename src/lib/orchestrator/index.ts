@@ -93,6 +93,12 @@ export class Orchestrator {
        *  AND rejects execution of unlisted tools (defense in depth).
        *  See src/lib/mcp/character-gating.ts. */
       allowedTools?: Set<string>;
+      /** Per-character opted-in MCP resources (qualified URIs like
+       *  "lore-server::lore://saltcoast/towns/port-llyr"). Empty when
+       *  the character hasn't opted in to any resources. Each opted-in
+       *  URI is fetched in parallel with YantrikDB recalls and merged
+       *  into canon-equivalent retrieval. See src/lib/mcp/resource-opt-in.ts. */
+      mcpEnabledResources?: string[];
       onChunk?: (chunk: string, accumulated: string) => void;
     }
   ): Promise<{
@@ -111,7 +117,10 @@ export class Orchestrator {
     if (scene) assertParticipant(scene, req.speaker);
     const t0 = performance.now();
     const [retrieval, recent] = await Promise.all([
-      retrieveForTurn(this.deps.client, req),
+      retrieveForTurn(this.deps.client, req, {
+        mcpEnabledResources: opts?.mcpEnabledResources,
+        mcpRegistry: this.deps.mcpRegistry,
+      }),
       this.deps.getRecentTurns(req.session_id),
     ]);
     const t1 = performance.now();

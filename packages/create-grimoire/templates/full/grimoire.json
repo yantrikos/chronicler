@@ -1,0 +1,20 @@
+{
+  "id": "{{PLUGIN_ID}}",
+  "name": "{{PLUGIN_NAME}}",
+  "version": "0.1.0",
+  "apiVersion": "^0.1.0",
+  "description": "{{PLUGIN_DESCRIPTION}}",
+  "author": "{{PLUGIN_AUTHOR}}",
+  "license": "{{PLUGIN_LICENSE}}",
+  "permissions": {
+    "network": [],
+    "filesystem": "plugin-data-only",
+    "llm": false,
+    "memory": false
+  },
+  "contributes": {
+    "hooks": [{ "point": "afterWrite", "type": "observer" }],
+    "commands": ["status"],
+    "ui": { "slots": ["inspector:tab"] }
+  }
+}

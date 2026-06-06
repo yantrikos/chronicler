@@ -11,6 +11,12 @@ import {
   saveCharacterGating,
   type CharacterGating,
 } from "../../lib/mcp/character-gating";
+import {
+  loadCharacterResourceOptIn,
+  saveCharacterResourceOptIn,
+  qualifyResourceUri,
+  type CharacterResourceOptIn,
+} from "../../lib/mcp/resource-opt-in";
 import type { McpServerRegistry } from "../../lib/mcp/registry";
 
 interface Props {
@@ -31,12 +37,60 @@ export function CharacterToolGating({ characterId, characterName, registry }: Pr
   const [gating, setGating] = useState<CharacterGating>(() =>
     loadCharacterGating(characterId)
   );
+  const [resourceOptIn, setResourceOptIn] = useState<CharacterResourceOptIn>(
+    () => loadCharacterResourceOptIn(characterId)
+  );
 
   // Reload when the character changes (parent may re-mount or just
   // pass a new id; this defends against the latter).
   useEffect(() => {
     setGating(loadCharacterGating(characterId));
+    setResourceOptIn(loadCharacterResourceOptIn(characterId));
   }, [characterId]);
+
+  const allResources = useMemo(() => {
+    const out: Array<{
+      serverId: string;
+      serverName: string;
+      uri: string;
+      qualifiedName: string;
+      name?: string;
+      description?: string;
+    }> = [];
+    for (const server of registry.list()) {
+      if (!server.enabled) continue;
+      const catalog = registry.getCatalog(server.id);
+      if (!catalog) continue;
+      for (const r of catalog.resources) {
+        out.push({
+          serverId: server.id,
+          serverName: server.name,
+          uri: r.uri,
+          qualifiedName: qualifyResourceUri(server.id, r.uri),
+          name: r.name,
+          description: r.description,
+        });
+      }
+    }
+    return out;
+  }, [registry, registryVersion]);
+
+  const enabledResourceSet = useMemo(
+    () => new Set(resourceOptIn.enabledResources),
+    [resourceOptIn.enabledResources]
+  );
+
+  function toggleResource(qualifiedName: string): void {
+    const next = new Set(enabledResourceSet);
+    if (next.has(qualifiedName)) next.delete(qualifiedName);
+    else next.add(qualifiedName);
+    const updated: CharacterResourceOptIn = {
+      configured: true,
+      enabledResources: Array.from(next),
+    };
+    setResourceOptIn(updated);
+    saveCharacterResourceOptIn(characterId, updated);
+  }
 
   const allTools = useMemo(() => {
     const out: Array<{
@@ -101,7 +155,7 @@ export function CharacterToolGating({ characterId, characterName, registry }: Pr
     saveCharacterGating(characterId, updated);
   }
 
-  if (allTools.length === 0) {
+  if (allTools.length === 0 && allResources.length === 0) {
     return (
       <div className="text-[12px] text-neutral-500 italic px-2 py-3">
         No MCP servers registered or no catalogs loaded yet. Add servers in
@@ -227,6 +281,83 @@ export function CharacterToolGating({ characterId, characterName, registry }: Pr
           );
         })}
       </div>
+
+      {allResources.length > 0 && (
+        <div className="pt-3 border-t border-neutral-800 space-y-2">
+          <div>
+            <h4 className="text-sm font-medium text-neutral-200">
+              Resources for retrieval
+            </h4>
+            <p className="text-[11px] text-neutral-500 mt-0.5 leading-relaxed">
+              Opt in to MCP resources you want the retriever to pull
+              alongside character + world canon every turn. Default is
+              <em className="text-neutral-400"> none</em> — resources cost
+              network and explicit choice avoids unrelated worlds leaking
+              into the prompt.
+            </p>
+          </div>
+          <div className="space-y-2">
+            {Array.from(
+              allResources.reduce(
+                (m, r) => {
+                  const k = r.serverId;
+                  if (m.has(k)) m.get(k)!.items.push(r);
+                  else m.set(k, { serverName: r.serverName, items: [r] });
+                  return m;
+                },
+                new Map<string, { serverName: string; items: typeof allResources }>()
+              ).entries()
+            ).map(([serverId, group]) => (
+              <div
+                key={serverId}
+                className="rounded border border-neutral-800 bg-neutral-950/40 p-2.5"
+              >
+                <header className="flex items-center justify-between mb-1.5">
+                  <div>
+                    <span className="font-medium text-neutral-200">
+                      {group.serverName}
+                    </span>
+                    <span className="ml-2 text-[10px] font-mono text-neutral-500">
+                      {serverId}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-neutral-500">
+                    {group.items.filter((r) =>
+                      enabledResourceSet.has(r.qualifiedName)
+                    ).length}{" "}
+                    / {group.items.length} enabled
+                  </span>
+                </header>
+                <ul className="space-y-0.5 max-h-56 overflow-y-auto">
+                  {group.items.map((r) => (
+                    <li
+                      key={r.qualifiedName}
+                      className="flex items-start gap-2 text-neutral-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabledResourceSet.has(r.qualifiedName)}
+                        onChange={() => toggleResource(r.qualifiedName)}
+                        className="mt-0.5 accent-amber-500"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <code className="text-amber-300 font-mono text-[11px] truncate block">
+                          {r.name ?? r.uri}
+                        </code>
+                        {r.description && (
+                          <p className="text-[11px] text-neutral-500 truncate">
+                            {r.description}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

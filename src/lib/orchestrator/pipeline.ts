@@ -30,12 +30,22 @@ export interface RetrievalResult {
   latency_ms: number;
 }
 
+export interface RetrievalOpts {
+  /** Opted-in MCP resources for this character (qualified
+   *  "serverId::uri" form). When set, their contents fetch in parallel
+   *  with YantrikDB recalls and merge into canon-equivalent retrieval. */
+  mcpEnabledResources?: string[];
+  /** MCP server registry — required when mcpEnabledResources is set. */
+  mcpRegistry?: import("../mcp/registry").McpServerRegistry;
+}
+
 /** Retrieve everything the orchestrator needs for a given turn. Recall is
  *  filtered by the `speaker` so a character can only see memories whose
  *  visible_to includes them (or is "*"). See scene.ts for the ACL model. */
 export async function retrieveForTurn(
   client: YantrikClient,
-  req: TurnRequest
+  req: TurnRequest,
+  opts: RetrievalOpts = {}
 ): Promise<RetrievalResult> {
   const t0 = performance.now();
   const query = req.user_message?.content ?? "";
@@ -69,7 +79,18 @@ export async function retrieveForTurn(
     )
   );
 
-  const [canonChar, worldRecalls, scene, heuristic, tempUp, _tempStale, conflicts, skills] =
+  // MCP resource fetch — third-party servers exposing URI-addressable
+  // canon content (lore databases, sourcebook scrapers, etc). Fetched
+  // in parallel with YantrikDB recalls; merges into canon-equivalent
+  // retrieval. Empty when no resources are opted in.
+  const mcpResourcesPromise =
+    opts.mcpEnabledResources && opts.mcpEnabledResources.length > 0 && opts.mcpRegistry
+      ? import("../mcp/resource-fetcher").then((m) =>
+          m.fetchOptedInResources(opts.mcpRegistry!, opts.mcpEnabledResources!)
+        )
+      : Promise.resolve([]);
+
+  const [canonChar, worldRecalls, mcpResources, scene, heuristic, tempUp, _tempStale, conflicts, skills] =
     await Promise.all([
       // Canon memories for active character
       client.recall({
@@ -81,6 +102,7 @@ export async function retrieveForTurn(
         expand_entities: true,
       }),
       worldRecallPromise,
+      mcpResourcesPromise,
       // Recent scene state (reflex tier, session-scoped)
       client.recall({
         query: query || "recent scene",
@@ -117,6 +139,7 @@ export async function retrieveForTurn(
     canon: mergeRankByScore([
       canonChar.results,
       ...worldRecalls.map((w) => w.results),
+      mcpResources,
     ]),
     scene: scene.results,
     heuristic: heuristic.results,

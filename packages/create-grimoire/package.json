@@ -1,0 +1,24 @@
+{
+  "name": "create-chronicler-grimoire",
+  "version": "0.1.0",
+  "description": "Scaffold a new Chronicler Grimoire plugin in seconds",
+  "bin": {
+    "create-chronicler-grimoire": "./bin.mjs"
+  },
+  "type": "module",
+  "files": [
+    "bin.mjs",
+    "templates"
+  ],
+  "keywords": ["chronicler", "grimoire", "scaffold", "cli"],
+  "license": "MIT",
+  "homepage": "https://github.com/yantrikos/chronicler/tree/main/packages/create-grimoire",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yantrikos/chronicler.git",
+    "directory": "packages/create-grimoire"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
