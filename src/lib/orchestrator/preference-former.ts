@@ -429,6 +429,7 @@ export async function applyUserDisposition(
   const nextState = disposition === "kept" ? "active" : "dismissed";
   await updatePreferenceState(client, pref.rid, nextState, {
     confirmed: disposition === "kept",
+    characterId: character_id,
   });
   former.invalidate(character_id);
 }

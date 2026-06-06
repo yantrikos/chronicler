@@ -1485,7 +1485,9 @@ function App() {
     // Edit = rewrite as new preference + dismiss old. Keeps the
     // dedup-by-id invariant clean.
     const client = clientRef.current;
-    await updatePreferenceState(client, pref.rid, "dismissed");
+    await updatePreferenceState(client, pref.rid, "dismissed", {
+      characterId: pref.character_id,
+    });
     await writePreference(client, {
       ...pref,
       id: undefined as unknown as string, // let writePreference recompute

@@ -2,6 +2,29 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.3.1] — 2026-06-06 — Preferences substrate round-trips
+
+Bug fix: the preferences substrate appeared empty in the inspector even after the verifier successfully wrote 12 entries. Root cause: YantrikDB's `memory.list` and `recall` responses don't include the `metadata` map at all (verified empirically by direct MCP probe — write with `pref_state: "active"` then read returns no metadata field). The substrate was writing fields YantrikDB never exposed back.
+
+**Fix**: encode the structured preference fields (state, level, sensitivity, evidence, polarity, etc.) in the text body itself with a marker prefix:
+
+```
+__GRIMOIRE_PREF_V1__
+{"id":"...","state":"active","interpretation_level":"interpretation",...}
+__END_PREF__
+Adira likes long verbal teasing before any touch
+```
+
+The human-readable statement still appears at the end so `recall` snippets stay meaningful. Reads parse out the JSON; rows without the marker (pre-fix entries) are silently skipped.
+
+Files: `src/lib/preferences/substrate.ts` (encode/decode helpers + writePreference/listPreferences rewritten + updatePreferenceState now uses delete+rewrite since metadata-update endpoints have the same strip behavior), `src/App.tsx` (pass `characterId` to updatePreferenceState), `src/lib/orchestrator/preference-former.ts` (same).
+
+**Migration**: existing preference entries written before this fix are unparseable (no marker, no metadata to recover) and silently skipped at read time. Users re-run "look for patterns now" to regenerate; this should be a sub-second operation since the verifier's per-character cache produces the same items deterministically given the same memory inputs.
+
+This closes the loop on the preferences feature shipped in v0.2.0 — the original substrate→verifier→state-machine→prompt-injection chain is now end-to-end demonstrable. Verified live: Adira yielded 3 new preferences from a single formation pass on local Ollama, all visible in the inspector.
+
+---
+
 ## [0.3.0] — 2026-06-06 — Grimoire ships
 
 The Phase 10 extension platform — Grimoire — is now a real ecosystem, not a substrate demo. Out-of-tree plugin install via the host volume mount with an in-app install wizard, a typed SDK package, a CLI scaffold, MCP tool calling with per-character gating, and **MCP resources as canon-equivalent retrieval** (the differentiator no other OSS RP client touches). The COMPARISON.md cell flips from 🟡 to ✅.
