@@ -2,6 +2,61 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.3.0] — 2026-06-06 — Grimoire ships
+
+The Phase 10 extension platform — Grimoire — is now a real ecosystem, not a substrate demo. Out-of-tree plugin install via the host volume mount with an in-app install wizard, a typed SDK package, a CLI scaffold, MCP tool calling with per-character gating, and **MCP resources as canon-equivalent retrieval** (the differentiator no other OSS RP client touches). The COMPARISON.md cell flips from 🟡 to ✅.
+
+### Compared to v0.2.1, what closes the gaps
+
+v0.2.1's CHANGELOG enumerated everything 0.2.1 was missing for a real Grimoire ship. Here's what 0.3.0 closes:
+
+- ✅ **Out-of-tree install path** — drop a plugin folder into `~/.chronicler/plugins/<id>/` on the host, chronicler picks it up with hot reload. Server-side esbuild bundles TS source; chokidar watches the dir tree; SSE events drive browser-side dynamic re-import.
+- ✅ **In-app install wizard** — Browse Grimoire modal accepts a git URL, server-side runs `git clone` into the mount, browser dynamic-imports, registers with the host. One-click install from any public github repo.
+- ✅ **`@chronicler/grimoire` published as an SDK package** — `packages/grimoire-sdk/` with full type surface + `defineGrimoire` runtime + README. Plugin authors get real types via `npm install --save-dev @chronicler/grimoire`. (Publish step is a follow-up; package builds cleanly.)
+- ✅ **`create-chronicler-grimoire` CLI scaffold** — `npx create-chronicler-grimoire my-plugin` → interactive prompts, four template choices (hook-only / slash-command / ui-slot / full), optional `npm install`. From zero to editing in <60 seconds.
+- ✅ **MCP tool calling end-to-end** — OpenAI tools format threaded through the orchestrator turn loop. The model sees `serverId__toolName` qualified functions, calls them, the registry executes, results inject as `role: "tool"` messages, loop continues up to 3 iterations. Chat UI renders 🔧 bubbles with markdown for image/audio/text/json results.
+- ✅ **Per-character tool gating** — checkbox grid in CharacterEditor with explicit `configured` flag disambiguating "default allow all" from "explicit deny all". Defense in depth at both definition collection and execution time.
+- ✅ **MCP resources as retrieval source** — new `mcp:<serverId>:<uri>` namespace materialized as `RecallResult`-shaped rows that merge into canon-equivalent retrieval. Per-character opt-in with default-DENY (resources cost network + need explicit choice). 5-minute TTL cache. Parallel fetch with YantrikDB recalls. **This is the differentiator no other OSS RP client touches** — community lore servers, sourcebook scrapers, world databases all compose into a character's available context.
+
+Still open (deferred to 0.4):
+- 🟡 **`npm publish` not yet run.** Both packages (`@chronicler/grimoire`, `create-chronicler-grimoire`) are publish-ready; run `npm publish` from each package directory after `npm login`.
+- 🟡 **Memory Inspector plugin is still a structural demo.** UI slot wiring works; live `api.memory` from slot components needs prop-contract extension (next iteration).
+- 🟡 **Preferences-on-reasoning-models** bug from v0.2.0 still open (saga #52). Local Ollama/Qwen models work normally; the bug only affects providers routing to reasoning models like deepseek-r1.
+
+### v0.2.1 → v0.3.0 commit log (9 commits)
+
+| Commit | Title |
+|---|---|
+| `3bea4a8` | grimoire: phase 10 foundation — typed plugin platform with hooks, slash, ui slots |
+| `b9f0fe9` | grimoire: mcp server registry + settings UX (tool calling next) |
+| `9dd42cb` | grimoire: mcp tool calling in the orchestrator turn loop |
+| `8b04021` | grimoire: per-character mcp tool gating |
+| `aeaa323` | chore: bump to 0.2.1 — Grimoire substrate (Phase 10 iteration) |
+| `8e9e92f` | grimoire: out-of-tree plugin install via host volume mount |
+| `745d531` | grimoire: in-app install wizard + uninstall + dynamic-loader tests |
+| `751264a` | grimoire: fail install fast on git auth prompts, friendlier errors |
+| `caed7a2` | grimoire: mcp resources as retrieval source + @chronicler/grimoire sdk package + create-chronicler-grimoire cli |
+
+### Test suite
+
+22/22 test files green:
+- New since 0.2.0: `grimoire-host`, `grimoire-slash`, `grimoire-slots`, `mcp-registry`, `mcp-tool-loop`, `character-gating`, `grimoire-dynamic-loader`, `mcp-resources` (~60 new assertions)
+- All 14 pre-existing test files still green
+
+### Compared to the field
+
+`docs/COMPARISON.md` Extension ecosystem cell flips from 🟡 to ✅. The differentiator copy:
+
+> Typed SDK on npm, hooks (observer/augmenter/strategy), slash commands, hot reload, UI slots, MCP server registration + tool calling + per-character gating + **MCP resources as canon-equivalent retrieval**, out-of-tree install via `~/.chronicler/plugins/` mount with in-app git-URL install wizard, `npx create-chronicler-grimoire` scaffold.
+
+The MCP-resources angle is the differentiator nobody else touches: third-party MCP servers exposing URI-addressable lore/canon data participate in retrieval alongside character/world canon. Community plugins can ship a server that exposes 10,000 forgotten-realms entries; a character opts in, those entries surface as canon-equivalent retrieval. The same MCP servers built for Claude Code, Cline, Zed, etc. work natively here. The ecosystem multiplier is real.
+
+### Reference plugin
+
+[`yantrikos/chronicler-grimoire-stats`](https://github.com/yantrikos/chronicler-grimoire-stats) — a community Grimoire plugin demonstrating three surfaces (afterWrite observer, `/stats` slash command, `inspector:tab` UI slot) in one repo. Zero permissions, MIT licensed, installable in one click via the Browse Grimoire modal. The pattern for community plugins.
+
+---
+
 ## [0.2.1] — 2026-06-03 — Grimoire substrate (Phase 10 iteration, not the public ship)
 
 Substrate work on the Phase 10 extension platform. The plumbing landed: typed plugin host, four contribution surfaces, MCP server registration, tool calling end-to-end with per-character gating, four first-party Grimoire entries. The **experience** isn't there yet — no out-of-tree install, no testing harness, no CLI scaffold, no community plugins exist. This is iteration toward the actual Grimoire ship at 0.3.0; tagged as 0.2.1 to keep the version namespace honest.

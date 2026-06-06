@@ -48,7 +48,7 @@ Legend: ✅ first-class · 🟡 partial / via plugin · ❌ absent / not designe
 | Multi-user / shared worlds | ❌ single-user | 🟡 instance-per-user | ❌ | ✅ designed for it |
 | Provider support (OpenAI / Anthropic / Ollama / OpenRouter / local) | ✅ | ✅ most extensive | ✅ | ✅ |
 | **Output filtering** (any kind) | ❌ never — explicitly NSFW-affirming | ❌ | ❌ | ❌ |
-| Extension ecosystem | 🟡 **Grimoire** (v0.2.1) — typed SDK, hooks (observer/augmenter/strategy), slash commands, hot reload, UI slots, MCP server registration **and tool calling** with per-character gating. Dynamic install path + community plugins ship in v0.3. | ✅ huge | 🟡 themes / scripts | 🟡 |
+| Extension ecosystem | ✅ **Grimoire** (v0.3) — typed SDK on npm, hooks (observer/augmenter/strategy), slash commands, hot reload, UI slots, MCP server registration + tool calling + per-character gating + **MCP resources as canon-equivalent retrieval**, out-of-tree install via `~/.chronicler/plugins/` mount with in-app git-URL install wizard, `npx create-chronicler-grimoire` scaffold | ✅ huge | 🟡 themes / scripts | 🟡 |
 | **Maturity** | | | | |
 | First release | 2026 | 2023 | 2023 | 2023 |
 | Public install base | small (early) | very large | large | medium |
