@@ -20,6 +20,7 @@ lerna-debug.log*
 *.secret
 *.pem
 *.key
+.npmrc
 
 # Chronicler local data
 .chronicler/

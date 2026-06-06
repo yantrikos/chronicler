@@ -18,8 +18,12 @@ v0.2.1's CHANGELOG enumerated everything 0.2.1 was missing for a real Grimoire s
 - ✅ **Per-character tool gating** — checkbox grid in CharacterEditor with explicit `configured` flag disambiguating "default allow all" from "explicit deny all". Defense in depth at both definition collection and execution time.
 - ✅ **MCP resources as retrieval source** — new `mcp:<serverId>:<uri>` namespace materialized as `RecallResult`-shaped rows that merge into canon-equivalent retrieval. Per-character opt-in with default-DENY (resources cost network + need explicit choice). 5-minute TTL cache. Parallel fetch with YantrikDB recalls. **This is the differentiator no other OSS RP client touches** — community lore servers, sourcebook scrapers, world databases all compose into a character's available context.
 
+### Published to npm
+
+- [`@chronicler/grimoire@0.1.0`](https://www.npmjs.com/package/@chronicler/grimoire) — `npm install --save-dev @chronicler/grimoire`
+- [`create-chronicler-grimoire@0.1.0`](https://www.npmjs.com/package/create-chronicler-grimoire) — `npx create-chronicler-grimoire my-plugin`
+
 Still open (deferred to 0.4):
-- 🟡 **`npm publish` not yet run.** Both packages (`@chronicler/grimoire`, `create-chronicler-grimoire`) are publish-ready; run `npm publish` from each package directory after `npm login`.
 - 🟡 **Memory Inspector plugin is still a structural demo.** UI slot wiring works; live `api.memory` from slot components needs prop-contract extension (next iteration).
 - 🟡 **Preferences-on-reasoning-models** bug from v0.2.0 still open (saga #52). Local Ollama/Qwen models work normally; the bug only affects providers routing to reasoning models like deepseek-r1.
 
