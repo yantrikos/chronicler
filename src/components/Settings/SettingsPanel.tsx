@@ -8,6 +8,8 @@ import {
 import { PROVIDER_TEMPLATES } from "../../lib/providers/templates";
 import type { McpServerRegistry } from "../../lib/mcp/registry";
 import { McpServersSection } from "./McpServersSection";
+import type { YantrikClient } from "../../lib/yantrikdb/client";
+import { DangerZone } from "./DangerZone";
 
 interface Props {
   config: ChroniclerConfig;
@@ -16,6 +18,9 @@ interface Props {
   onExportBackup?: () => void;
   onImportBackup?: (file: File) => void | Promise<void>;
   mcpRegistry?: McpServerRegistry;
+  /** Required for the Danger Zone wipe-memories action. When omitted,
+   *  the danger zone is hidden entirely. */
+  yantrikClient?: YantrikClient;
 }
 
 export function SettingsPanel({
@@ -25,6 +30,7 @@ export function SettingsPanel({
   onExportBackup,
   onImportBackup,
   mcpRegistry,
+  yantrikClient,
 }: Props) {
   const [draft, setDraft] = useState<ChroniclerConfig>(config);
 
@@ -381,6 +387,12 @@ export function SettingsPanel({
         {mcpRegistry && (
           <section className="px-5 py-4 border-t border-neutral-800">
             <McpServersSection registry={mcpRegistry} />
+          </section>
+        )}
+
+        {yantrikClient && (
+          <section className="px-5 py-4 border-t border-neutral-800">
+            <DangerZone client={yantrikClient} />
           </section>
         )}
 

@@ -2953,6 +2953,7 @@ function App() {
             onExportBackup={onExportBackup}
             onImportBackup={onImportBackup}
             mcpRegistry={mcpRegistryRef.current}
+            yantrikClient={clientRef.current}
           />
         )}
       </div>
@@ -3533,6 +3534,7 @@ function App() {
           onExportBackup={onExportBackup}
           onImportBackup={onImportBackup}
           mcpRegistry={mcpRegistryRef.current}
+          yantrikClient={clientRef.current}
         />
       )}
       {promptInspectorOpen && (

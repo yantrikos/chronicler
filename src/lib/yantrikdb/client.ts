@@ -173,6 +173,58 @@ export class YantrikClient {
     await this.transport.call("forget", { rid });
   }
 
+  /** Wipe every memory in YantrikDB. Pages through `memory.list`
+   *  (no namespace filter) and `forget`s each rid. Progress callback
+   *  fires after each batch so a UI can show "wiping 184/562 rows".
+   *  Returns the total number forgotten. */
+  async wipeAllMemories(opts: {
+    /** Page size for the list query. Default 100. */
+    pageSize?: number;
+    /** Cap parallel forget calls to avoid hammering the transport.
+     *  Default 8. */
+    concurrency?: number;
+    onProgress?: (done: number, total: number) => void;
+  } = {}): Promise<number> {
+    const pageSize = opts.pageSize ?? 100;
+    const concurrency = opts.concurrency ?? 8;
+    let totalForgotten = 0;
+    // Outer loop: keep listing from offset 0 until the namespace is empty.
+    // We don't trust offset accounting because forgets shift the result
+    // set under us; re-listing from 0 each pass is robust.
+    while (true) {
+      const res = await this.transport.call("memory", {
+        action: "list",
+        limit: pageSize,
+        offset: 0,
+      });
+      const parsed = parseMaybeWrapped(res);
+      let memories: Array<{ rid?: string }> = [];
+      let total = 0;
+      if (parsed && typeof parsed === "object") {
+        const p = parsed as { memories?: unknown; total?: number };
+        if (Array.isArray(p.memories)) {
+          memories = p.memories as Array<{ rid?: string }>;
+        }
+        if (typeof p.total === "number") total = p.total;
+      }
+      if (memories.length === 0) break;
+      // Parallel forget within a concurrency window.
+      for (let i = 0; i < memories.length; i += concurrency) {
+        const batch = memories.slice(i, i + concurrency);
+        await Promise.all(
+          batch.map(async (m) => {
+            if (m.rid) {
+              await this.forget(m.rid).catch(() => undefined);
+              totalForgotten++;
+            }
+          })
+        );
+        opts.onProgress?.(totalForgotten, total);
+      }
+    }
+    return totalForgotten;
+  }
+
   async correct(rid: string, newText: string): Promise<void> {
     await this.transport.call("correct", { rid, text: newText });
   }
