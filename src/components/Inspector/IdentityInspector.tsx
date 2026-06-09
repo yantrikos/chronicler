@@ -9,6 +9,10 @@
 
 import { useState } from "react";
 import type { InspectorCoreTrait, InspectorIdentity } from "../../lib/identity/aggregator";
+import {
+  CrossModelResultsSection,
+  type CrossModelBenchmarkResult,
+} from "./CrossModelResultsSection";
 
 interface Props {
   identity: InspectorIdentity | null;
@@ -21,6 +25,10 @@ interface Props {
   onDisableTrait: (skillId: string) => void;
   /** Re-enable a previously-disabled trait. */
   onEnableTrait: (skillId: string) => void;
+  /** Pillar 4 — published cross-model benchmark result. Null when no
+   *  benchmark has been run; the section then renders methodology +
+   *  CLI instructions. */
+  benchmarkResult: CrossModelBenchmarkResult | null;
 }
 
 export function IdentityInspector({
@@ -29,6 +37,7 @@ export function IdentityInspector({
   isRegenerating,
   onDisableTrait,
   onEnableTrait,
+  benchmarkResult,
 }: Props) {
   if (!identity) {
     return (
@@ -55,6 +64,7 @@ export function IdentityInspector({
           onEnable={onEnableTrait}
         />
         <CrystallizationTimelineSection traits={crystallization_timeline} />
+        <CrossModelResultsSection result={benchmarkResult} />
       </div>
     </div>
   );

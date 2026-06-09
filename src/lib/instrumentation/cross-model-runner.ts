@@ -13,6 +13,7 @@
 // scene prompt.
 
 import type { ChatMessage, LlmProvider } from "../providers";
+import { ANTI_CONFABULATION_CLAUSE } from "../orchestrator/anti-confabulation";
 
 export interface ProviderUnderTest {
   /** Display name used in the result rows ("qwen3:14b", "llama-3:70b"). */
@@ -64,16 +65,11 @@ export interface CrossModelRunResult {
   replies: BenchmarkRunReply[];
 }
 
-const ANTI_CONFAB = `Ground rules for continuity — these override any competing instruction:
-
-- Treat only the facts in <canon> and <scene> as real.
-- Do not reference prior events, relationships, or character history that are not present in those sections.
-- If asked about something not in memory, respond in character by asking, deflecting, saying you don't recall, or changing the subject. Never invent.
-- Memories under <heuristic> are clues, not facts. They may be wrong. Weight them as soft context only.`;
-
 /** Build the system prompt a cross-model run sends. Mirrors the
  *  identity-layer structure of withAntiConfabulation (Pillar 1 + 2
- *  blocks contiguous, identity precedes context, anti-confab last). */
+ *  blocks contiguous, identity precedes context, anti-confab last).
+ *  Uses the production ANTI_CONFABULATION_CLAUSE so the benchmark
+ *  validates what real users get — single source of truth. */
 export function buildBenchmarkSystemPrompt(fixture: CharacterFixture): string {
   const parts: string[] = [fixture.character_system_prompt.trim()];
   if (fixture.core_traits.length > 0) {
@@ -85,7 +81,7 @@ export function buildBenchmarkSystemPrompt(fixture: CharacterFixture): string {
   if (fixture.self_model.trim().length > 0) {
     parts.push(`<self_model>\n${fixture.self_model.trim()}\n</self_model>`);
   }
-  parts.push(ANTI_CONFAB);
+  parts.push(ANTI_CONFABULATION_CLAUSE);
   return parts.join("\n\n");
 }
 

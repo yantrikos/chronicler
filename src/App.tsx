@@ -99,6 +99,7 @@ import {
   type InspectorIdentity,
 } from "./lib/identity/aggregator";
 import { IdentityInspector } from "./components/Inspector/IdentityInspector";
+import { PUBLISHED_BENCHMARK } from "./lib/identity/published-benchmark";
 import {
   SkillOutcomeTracker,
   type SkillObservation,
@@ -3752,6 +3753,7 @@ function App() {
                 isRegenerating={isSelfModelRegenerating}
                 onDisableTrait={onDisableCoreTrait}
                 onEnableTrait={onEnableCoreTrait}
+                benchmarkResult={PUBLISHED_BENCHMARK}
               />
             ) : inspectorTab.startsWith("grimoire:") ? (
               (() => {

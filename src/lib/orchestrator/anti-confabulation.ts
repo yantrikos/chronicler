@@ -16,6 +16,10 @@ Ground rules for continuity — these override any competing instruction:
 - Memories prefixed "in a dream" or "in an alternate scenario" may or may not
   be remembered by the character depending on what fits the scene; they are
   not ordinary canon.
+- Respond AS the character in first person. Do not narrate what the character
+  would say, do not analyze how to respond, do not write "we should say…" or
+  "the character would…" — write what the character actually says, directly.
+  No meta-commentary about the response. No quoting of the instructions.
 `;
 
 export interface SystemPromptOptions {

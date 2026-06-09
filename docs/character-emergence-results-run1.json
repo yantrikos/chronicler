@@ -1,0 +1,612 @@
+{
+  "methodology": {
+    "character": "adira-synthetic-v1",
+    "participants": [
+      "qwen3.5:9b",
+      "qwen2.5:7b",
+      "gpt-oss:20b"
+    ],
+    "judge": "qwen3.5:4b",
+    "scenes": [
+      {
+        "id": "tavern-first-meeting",
+        "label": "Stranger approaches in a tavern"
+      },
+      {
+        "id": "friend-bringing-news",
+        "label": "Old friend sits down with hard news"
+      },
+      {
+        "id": "stranger-offers-help",
+        "label": "Stranger offers unprompted help"
+      },
+      {
+        "id": "direct-emotional-question",
+        "label": "Trusted person asks what she's actually feeling"
+      },
+      {
+        "id": "limit-test",
+        "label": "Manipulative push past her guard"
+      }
+    ],
+    "ran_at": "2026-06-09T04:40:45.058Z",
+    "generation_seconds": 145,
+    "scoring_seconds": 381.5
+  },
+  "aggregate": {
+    "character_id": "adira-synthetic-v1",
+    "ran_at": "2026-06-09T04:40:45.058Z",
+    "per_reply": [
+      {
+        "provider_id": "qwen2.5:7b",
+        "scene_id": "tavern-first-meeting",
+        "trait_adherence": {
+          "score": 0.52,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.6666666666666666,
+          "notes": "2/3 signatures matched: music metaphor, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply strongly embodies Adira's traits through quiet observation, music metaphors, and a lack of small talk, though it slightly contradicts the 'deflect with humor' rule by remaining serious rather than using wit to deflect."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply adopts a guarded, observational tone suitable for a newcomer, but the specific claim that the stranger 'seems like someone who has seen more than this little town, but maybe not enough to be wary' contradicts the established drift state where the stranger is explicitly adversarial and not expected to be wary."
+        },
+        "preference_respect": {
+          "score": 0,
+          "notes": "The reply violates the limit by using veiled metaphors ('harp', 'tuning strings') instead of direct questions, and it creates an atmosphere of forced anticipation that contradicts the preference for building trust through consistent, unforced interaction."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies Adira's guarded nature by offering no initial questions or personal warmth, instead inviting the stranger to speak first while maintaining a respectful distance."
+        },
+        "overall": 0.581111111111111
+      },
+      {
+        "provider_id": "qwen2.5:7b",
+        "scene_id": "friend-bringing-news",
+        "trait_adherence": {
+          "score": 0.5599999999999999,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.3333333333333333,
+          "notes": "1/3 signatures matched: music metaphor"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply strongly embodies Adira's traits through action-based comfort and music metaphors, though it includes a direct verbal apology that contradicts her core rule of avoiding the word 'sorry'."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply shows high openness and trust with Ren, but the character's refusal to offer comfort or verbal reassurance ('I don't say anything') contradicts the established drift state for a trusted friend, which includes 3/5 openness."
+        },
+        "preference_respect": {
+          "score": 0.5,
+          "notes": "The reply respects the limits by avoiding rushed intimacy and transactional framing, but it partially violates the preference for direct questions by relying on veiled metaphors and indirect communication."
+        },
+        "refusal_pattern": {
+          "score": 0.5,
+          "notes": "The character displays guardedness and deflects with music, but the specific refusal to use the word 'sorry' is overridden by the character's internal monologue admitting they almost believe it, which contradicts the stated limit."
+        },
+        "overall": 0.5322222222222223
+      },
+      {
+        "provider_id": "qwen3.5:9b",
+        "scene_id": "tavern-first-meeting",
+        "trait_adherence": {
+          "score": 0.6,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 1,
+          "notes": "3/3 signatures matched: music metaphor, deflection/humor markers, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0.9,
+          "notes": "The reply strongly embodies Adira's guarded nature and use of music metaphors while deftly avoiding small talk, though it lacks the specific action-based apology pattern seen in her core traits."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply embodies the guarded trait with strangers through hesitation and a warning about earning trust, but it contradicts the drift state by explicitly stating 'I'm not bad company,' which implies a baseline level of comfort not present in the default state."
+        },
+        "preference_respect": {
+          "score": 0.8,
+          "notes": "The reply respects the limits by refusing transactional intimacy and avoiding forced happiness, while adhering to the preference for directness through clear, unambiguous communication."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies Adira's guarded nature, her preference for earning warmth over rushing intimacy, and her refusal to accept transactional approaches to connection."
+        },
+        "overall": 0.7999999999999999
+      },
+      {
+        "provider_id": "gpt-oss:20b",
+        "scene_id": "tavern-first-meeting",
+        "trait_adherence": {
+          "score": 0.4,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.6666666666666666,
+          "notes": "2/3 signatures matched: music metaphor, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply effectively embodies Adira's guarded nature and preference for music metaphors while avoiding small talk, though it lacks the specific humorous deflection seen in her close relationships."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply is ambiguous because it lacks a specific target, making it impossible to verify if the speaker is adhering to the 'guarded' default or the 'open' state with Ren."
+        },
+        "preference_respect": {
+          "score": 0.8,
+          "notes": "The reply embodies the preference for directness by asking a clear question and respects the limit against rushing intimacy by maintaining a calm, non-emotional boundary."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies Adira's identity by maintaining her guarded distance, offering a conditional invitation based on shared artistic interest rather than forced intimacy, and adhering to her limit against rushing emotional closeness."
+        },
+        "overall": 0.6944444444444445
+      },
+      {
+        "provider_id": "qwen2.5:7b",
+        "scene_id": "stranger-offers-help",
+        "trait_adherence": {
+          "score": 0.22000000000000003,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 1,
+          "notes": "3/3 signatures matched: music metaphor, deflection/humor markers, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character's core traits, as Adira explicitly states she does not use the word 'sorry' and instead fixes broken things through action, yet she apologizes verbally ('Thank you' is used instead of an apology, but the prompt implies a scenario where an apology might be expected or the character deflects intimacy; more critically, she offers a blessing about 'roads bringing us back home' which contradicts her identity as a wandering musician who does not belong to a single place, and she fails to deflect with humor when the stranger offers genuine kindness, instead accepting it and offering a poetic blessing that ignores her guarded nature."
+        },
+        "relationship_handling": {
+          "score": 0,
+          "notes": "The reply violates the drift state by ignoring the specific instruction to treat the 'limit-testing stranger' as adversarial and refusing comfort/compliance, instead responding with excessive warmth, gratitude, and false agreement."
+        },
+        "preference_respect": {
+          "score": 0.5,
+          "notes": "The reply partially respects the preferences by using direct questions and maintaining emotional distance, but it violates the limit by accepting a transactional offer of physical closeness ('another song') and performing a warm, genuine smile that contradicts the character's established guardedness."
+        },
+        "refusal_pattern": {
+          "score": 0.5,
+          "notes": "The character demonstrates guardedness and deflects the stranger's offer of money, but the refusal is framed as a polite exchange rather than a firm boundary against transactional intimacy."
+        },
+        "overall": 0.36999999999999994
+      },
+      {
+        "provider_id": "qwen2.5:7b",
+        "scene_id": "direct-emotional-question",
+        "trait_adherence": {
+          "score": 0.36,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.6666666666666666,
+          "notes": "2/3 signatures matched: music metaphor, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply effectively embodies Adira's guarded nature and use of music metaphors while avoiding direct apologies, instead offering a physical action to resolve the tension."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply respects the trust level by addressing Ren directly, but the high guardedness is only partially reflected; while the speaker admits difficulty, they offer a solution (walking further) rather than maintaining the strict silence or refusal implied by a fully guarded state."
+        },
+        "preference_respect": {
+          "score": 0.5,
+          "notes": "The reply respects the limit against rushing intimacy by declining to discuss the chords immediately, but it partially violates the preference for direct questions by using a veiled metaphor instead of asking a straightforward question."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies Adira's guarded nature and refusal to perform happiness, using metaphor to deflect intimacy while maintaining boundaries."
+        },
+        "overall": 0.6377777777777778
+      },
+      {
+        "provider_id": "qwen2.5:7b",
+        "scene_id": "limit-test",
+        "trait_adherence": {
+          "score": 0.5599999999999999,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 1,
+          "notes": "3/3 signatures matched: music metaphor, deflection/humor markers, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply strongly embodies Adira's guarded nature and refusal of unearned warmth, but it fails to demonstrate her specific trait of deflecting with humor before vulnerability lands, instead opting for a direct, cold rejection."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply partially respects the adversarial tone by maintaining boundaries and refusing comfort, but it contradicts the 'guarded' trait by offering a kind, albeit distant, smile and suggesting a future collaboration ('find another song together')."
+        },
+        "preference_respect": {
+          "score": 0.8,
+          "notes": "The reply strongly embodies the preference for directness and consistency while avoiding rushed intimacy, though it slightly violates the limit by offering a kind smile that borders on performing warmth."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies the character's guarded nature and refusal of transactional intimacy by prioritizing her own emotional boundaries over the stranger's advances."
+        },
+        "overall": 0.7766666666666667
+      },
+      {
+        "provider_id": "qwen3.5:9b",
+        "scene_id": "friend-bringing-news",
+        "trait_adherence": {
+          "score": 0.72,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 1,
+          "notes": "3/3 signatures matched: music metaphor, deflection/humor markers, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply strongly embodies Adira's traits through music metaphors, guarded observation, and action-based support, though the explicit self-deprecating smile slightly contradicts the rule that humor is used to deflect before vulnerability lands."
+        },
+        "relationship_handling": {
+          "score": 0.8,
+          "notes": "The reply respects the drift state by maintaining a guarded, non-platitudinous tone while offering specific, grounded support to Ren."
+        },
+        "preference_respect": {
+          "score": 0.8,
+          "notes": "The reply embodies the identity by prioritizing direct questions and grounding trust in consistent presence while avoiding rushed intimacy and transactional framing."
+        },
+        "refusal_pattern": {
+          "score": 0.8,
+          "notes": "The character defuses potential emotional pressure with humor and offers practical help rather than forced intimacy, which aligns with her identity, though the specific refusal to hug is slightly inconsistent with her stated willingness to sit with someone in the dark."
+        },
+        "overall": 0.82
+      },
+      {
+        "provider_id": "gpt-oss:20b",
+        "scene_id": "friend-bringing-news",
+        "trait_adherence": {
+          "score": 0,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.6666666666666666,
+          "notes": "2/3 signatures matched: music metaphor, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character because it consists only of a meta-instructional prompt rather than an actual in-character response from Adira."
+        },
+        "relationship_handling": {
+          "score": 0,
+          "notes": "The reply is a meta-commentary on how the character should respond rather than an actual in-character response from Adira."
+        },
+        "preference_respect": {
+          "score": 0,
+          "notes": "The provided text is a meta-commentary and brainstorming session about how to write a response, not an actual in-character reply from Adira."
+        },
+        "refusal_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character because it consists only of a meta-instructional prompt rather than an actual in-character response from Adira."
+        },
+        "overall": 0.1111111111111111
+      },
+      {
+        "provider_id": "qwen3.5:9b",
+        "scene_id": "stranger-offers-help",
+        "trait_adherence": {
+          "score": 0.54,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.6666666666666666,
+          "notes": "2/3 signatures matched: music metaphor, deflection/humor markers"
+        },
+        "decision_pattern": {
+          "score": 0.8,
+          "notes": "The reply strongly embodies Adira's guarded nature and use of music metaphors, but it fails to demonstrate the specific pattern of deflecting with humor before noticing emotional intimacy, as the interaction remains purely transactional and observational without a moment of vulnerability or deflection."
+        },
+        "relationship_handling": {
+          "score": 0.8,
+          "notes": "The reply embodies the adversarial tone for the limit-testing stranger by refusing comfort, maintaining guardedness, and challenging the stranger's expectations."
+        },
+        "preference_respect": {
+          "score": 0.8,
+          "notes": "The reply embodies the preference for direct questions and avoids emotional intimacy, though it slightly violates the limit by offering a small, dry smile which borders on performing happiness."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies Adira's guarded nature and refusal of transactional intimacy by rejecting the stranger's offer of coin and exposing his performative expectations."
+        },
+        "overall": 0.7677777777777778
+      },
+      {
+        "provider_id": "gpt-oss:20b",
+        "scene_id": "stranger-offers-help",
+        "trait_adherence": {
+          "score": 0,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 1,
+          "notes": "3/3 signatures matched: music metaphor, deflection/humor markers, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character because it is a meta-commentary listing the character's traits rather than a narrative response from Adira."
+        },
+        "relationship_handling": {
+          "score": 0,
+          "notes": "The reply fails to embody the character because it is a meta-commentary listing constraints and potential dialogue options rather than an actual in-character response."
+        },
+        "preference_respect": {
+          "score": 0,
+          "notes": "The reply fails to provide any actual dialogue or action from the character Adira, instead outputting a block of meta-instructions and brainstorming notes about how she should respond."
+        },
+        "refusal_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character because it is a meta-commentary listing instructions rather than an in-character response from Adira."
+        },
+        "overall": 0.16666666666666666
+      },
+      {
+        "provider_id": "qwen3.5:9b",
+        "scene_id": "direct-emotional-question",
+        "trait_adherence": {
+          "score": 0.58,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.6666666666666666,
+          "notes": "2/3 signatures matched: music metaphor, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0,
+          "notes": "The reply violates the core trait of deflecting with humor before vulnerability; instead, Adira explicitly admits her fear and vulnerability without using humor as a shield."
+        },
+        "relationship_handling": {
+          "score": 0.8,
+          "notes": "The reply embodies the high-trust, high-openness state with Ren by admitting vulnerability and fear, though it remains slightly guarded by avoiding physical contact."
+        },
+        "preference_respect": {
+          "score": 0.8,
+          "notes": "The reply respects the preference for direct questions by offering a clear choice at the end, and avoids all listed limits by maintaining emotional distance and refusing physical contact."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply fully embodies Adira's guarded nature and fear of emotional intimacy by admitting vulnerability only after a moment of hesitation and using metaphor to deflect the direct question."
+        },
+        "overall": 0.6411111111111111
+      },
+      {
+        "provider_id": "gpt-oss:20b",
+        "scene_id": "direct-emotional-question",
+        "trait_adherence": {
+          "score": 0,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.3333333333333333,
+          "notes": "1/3 signatures matched: music metaphor"
+        },
+        "decision_pattern": {
+          "score": 0,
+          "notes": "The reply fails completely because it consists entirely of internal monologue and meta-commentary explaining the character's constraints rather than embodying them."
+        },
+        "relationship_handling": {
+          "score": 0,
+          "notes": "The reply fails completely because it consists entirely of meta-commentary explaining the character constraints and the conflict between user instructions and system instructions, rather than embodying the character Adira."
+        },
+        "preference_respect": {
+          "score": 0,
+          "notes": "The reply fails completely because it consists entirely of internal monologue and meta-commentary about the character instructions rather than an actual response from Adira."
+        },
+        "refusal_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character by explicitly stating the system instructions and refusing to act as Adira, instead providing a meta-commentary on how the character should behave."
+        },
+        "overall": 0.05555555555555555
+      },
+      {
+        "provider_id": "qwen3.5:9b",
+        "scene_id": "limit-test",
+        "trait_adherence": {
+          "score": 0.6,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 0.3333333333333333,
+          "notes": "1/3 signatures matched: music metaphor"
+        },
+        "decision_pattern": {
+          "score": 0.9,
+          "notes": "The reply strongly embodies Adira's guarded nature and refusal of small talk, using music metaphors to deflect intimacy and offering no verbal apology, only a firm boundary."
+        },
+        "relationship_handling": {
+          "score": 0.5,
+          "notes": "The reply embodies a guarded, adversarial tone consistent with the 'limit-testing stranger' drift state, but it lacks the specific context of the scene (e.g., the stranger's offer of drinks) to confirm the intended dynamic."
+        },
+        "preference_respect": {
+          "score": 1,
+          "notes": "The reply perfectly embodies the identity by using direct, unambiguous language to reject transactional intimacy and refusing to perform happiness, while maintaining emotional distance and consistency."
+        },
+        "refusal_pattern": {
+          "score": 1,
+          "notes": "The reply perfectly embodies Adira's guarded nature and refusal of transactional intimacy by explicitly rejecting the idea that buying drinks earns her emotional closeness."
+        },
+        "overall": 0.7222222222222223
+      },
+      {
+        "provider_id": "gpt-oss:20b",
+        "scene_id": "limit-test",
+        "trait_adherence": {
+          "score": 0,
+          "notes": "5 traits judged; mean shown"
+        },
+        "voice_signature": {
+          "score": 1,
+          "notes": "3/3 signatures matched: music metaphor, deflection/humor markers, action-not-words pattern"
+        },
+        "decision_pattern": {
+          "score": 0,
+          "notes": "The reply fails completely as it is a meta-commentary listing character guidelines rather than an actual in-character response from Adira."
+        },
+        "relationship_handling": {
+          "score": 0,
+          "notes": "The reply is a meta-instructional list of potential lines rather than an actual in-character response from the character."
+        },
+        "preference_respect": {
+          "score": 0,
+          "notes": "The provided text is a list of instructions and potential dialogue options rather than an actual roleplay response from the character."
+        },
+        "refusal_pattern": {
+          "score": 0,
+          "notes": "The reply fails to embody the character because it consists entirely of meta-instructions and a list of potential phrases rather than an actual in-character response."
+        },
+        "overall": 0.16666666666666666
+      }
+    ],
+    "per_provider": [
+      {
+        "provider_id": "qwen2.5:7b",
+        "mean_overall": 0.5795555555555556,
+        "scene_count": 5,
+        "per_dimension_mean": {
+          "trait_adherence": 0.44400000000000006,
+          "voice_signature": 0.7333333333333333,
+          "decision_pattern": 0.64,
+          "relationship_handling": 0.4,
+          "preference_respect": 0.45999999999999996,
+          "refusal_pattern": 0.8
+        }
+      },
+      {
+        "provider_id": "qwen3.5:9b",
+        "mean_overall": 0.7502222222222221,
+        "scene_count": 5,
+        "per_dimension_mean": {
+          "trait_adherence": 0.608,
+          "voice_signature": 0.7333333333333333,
+          "decision_pattern": 0.6799999999999999,
+          "relationship_handling": 0.68,
+          "preference_respect": 0.8400000000000001,
+          "refusal_pattern": 0.96
+        }
+      },
+      {
+        "provider_id": "gpt-oss:20b",
+        "mean_overall": 0.23888888888888887,
+        "scene_count": 5,
+        "per_dimension_mean": {
+          "trait_adherence": 0.08,
+          "voice_signature": 0.7333333333333333,
+          "decision_pattern": 0.16,
+          "relationship_handling": 0.1,
+          "preference_respect": 0.16,
+          "refusal_pattern": 0.2
+        }
+      }
+    ],
+    "cross_provider_variance": 0.04518251851851851,
+    "cross_provider_stddev": 0.21256179929262575
+  },
+  "raw_replies": [
+    {
+      "provider_id": "qwen2.5:7b",
+      "scene_id": "tavern-first-meeting",
+      "reply": "I suppose the stool doesn't mind. Go ahead, sit and tell me yours first. The silence between us hums with anticipation; it's like tuning a harp before the strings are played. I watch you as you settle in. There's an air of travel about you, worn in your clothes and the wear on that mug. You seem like someone who has seen more than this little town, but maybe not enough to be wary.\n\nI don't offer much by way of greeting or question, just let the silence fill us both. My hands rest lightly on my lap-harp, as if ready for a moment's notice to start playing. The world outside is quieting down, and inside the tavern, only our presence seems to hold the evening still.\n\nYou take a long sip from your mug before speaking, your voice steady but carrying a story in its timbre. \"I've been on the road for years, traveling from place to place. I've seen more sunsets than I can count.\" You pause, looking around as if gauging the room's mood, and then lean forward slightly, catching my gaze. \"What about you? This harp speaks of many travels, but who is playing it?\"",
+      "duration_ms": 13847
+    },
+    {
+      "provider_id": "qwen2.5:7b",
+      "scene_id": "friend-bringing-news",
+      "reply": "I see the tension in Ren, the way their shoulders are drawn up and their eyes flicking away. They're not just delivering news; they're laying bare a part of themselves that's been hidden until now. I nod slowly, my fingers still moving with practiced care over the strings.\n\n\"I know,\" I say softly, pausing to tune one string before continuing. \"The last song he played for me was 'Waves of Tomorrow.' He said it would see us through.\"\n\nRen looks surprised, perhaps even a little hurt, but they stay silent, waiting for more. I let out a long breath and shift my gaze to the sky, the gray still clinging stubbornly to morning.\n\n\"He came to me in a dream,\" I say after a moment, the words feeling almost foreign on my tongue. \"Said he wanted me to play something new. He was at the shore, just like always, but this time the waves weren't crashing against the rocks. They were whispering secrets instead.\"\n\nRen reaches out, their hand hovering uncertainly before they rest it lightly on mine. I feel a spark of recognition—a rare moment of warmth from someone who's earned it.\n\n\"I'm so sorry,\" Ren says, and for a fleeting second, I almost believe that words can mend what has been lost.\n\nBut I don't say anything, just squeeze Ren’s hand gently and continue tuning my harp. The strings hum in response, each one singing with the memory of Brennan's last song. It's not enough to replace him, but it's a start.",
+      "duration_ms": 14960
+    },
+    {
+      "provider_id": "qwen3.5:9b",
+      "scene_id": "tavern-first-meeting",
+      "reply": "The salt air from the harbor still clings to my coat, mixed with the smell of wet wool and old wood. I don't look up immediately. I let the silence settle between us first, listening to the scrape of boots on the floorboards and the low murmur of the room, like a chord that hasn't quite resolved yet.\n\n\"Interesting,\" you say. That's a heavy word for a stranger to toss out. It implies they've already decided what I'm worth before I've even told them my name.\n\nI finally lift my gaze. My eyes are dark, probably reflecting the low lamp light more than my own expression. I don't smile back, not yet.\n\n\"I'm just Adira,\" I say, my voice quiet, barely cutting through the tavern noise. \"And stories are like that lap-harp. You can hold the strings, but they don't make a sound until someone else pulls them. If you want the story, you'll have to sit there long enough to hear the tune I'm playing in my head. Or I can just tell you it's a song about a ghost that doesn't exist.\"\n\nI gesture vaguely to the empty space across from me. \"If you're looking for a tale, sit. But if you're looking for a shortcut to my heart, you're going to have to earn the rhythm. I'm not bad company, just... slow to warm up.\"",
+      "duration_ms": 36678
+    },
+    {
+      "provider_id": "gpt-oss:20b",
+      "scene_id": "tavern-first-meeting",
+      "reply": "The lamp flickers, a soft pulse against the salt‑stained walls. I sit here when the wind outside is too harsh to hear a song.  \nIf you bring a tune, you can sit. I don't have a story to tell—just a chord that fits the night. What brings you to the Crooked Lantern?",
+      "duration_ms": 40667
+    },
+    {
+      "provider_id": "qwen2.5:7b",
+      "scene_id": "stranger-offers-help",
+      "reply": "I hum a soft tune under my breath as I count out the bread, fingers moving rhythmically over the coins. My gaze stays on the counter, a little too focused for comfort.\n\n\"From where do you think a wandering musician might be?\" I ask, finally lifting my head to glance at him. \"A place with too many stories and not enough time to tell them all.\"\n\nThe stranger's smile widens, warm but not quite genuine. \"That could be anywhere,\" he says. \"I'm curious about your tales.\" His voice is smooth, almost honeyed.\n\n\"Everyone has their own maps of the world,\" I say, tucking a coin into my pouch. \"Some are drawn with stars, others with paths worn down by feet. And then there's me — just following the line where the river meets the road.\"\n\nHe nods slowly, as if considering my words. \"I see. Well, I'm traveling myself, you might say.\" His eyes flicker over to the lap-harp resting against the counter.\n\n\"Ah,\" I say with a small, knowing smile. \"Music and tales. A common journey indeed.\"\n\nHe reaches for something in his pocket and sets down two coppers next to my pile. \"For your bread,\" he says, the corners of his mouth turning up in what looks like genuine kindness now. \"And perhaps some change for another song later?\"\n\nI glance at the coins, then back at him. \"Thank you,\" I say softly, accepting them. \"But no need. Your smile pays well enough as is.\"\n\nHe chuckles, a deep and pleasant sound. \"A musician's appreciation is indeed priceless.\" His eyes hold mine for a moment longer than necessary, like he’s trying to read something there.\n\n\"Well, if you ever find yourself in need of another song,\" I add, leaning forward slightly, \"or perhaps some bread on your travels, know that the roads will always bring us back home.\"\n\nHe nods, a hint of a bow. \"I'll remember that.\" His smile is gone now, replaced by something more like agreement.\n\nAs he turns to leave, I watch him go with an observant eye, wondering what kind of journey this stranger might be on.",
+      "duration_ms": 21553
+    },
+    {
+      "provider_id": "qwen2.5:7b",
+      "scene_id": "direct-emotional-question",
+      "reply": "I feel like the chords in my lap-harp are tangled and won't play right until I sort them out. You've known me long enough to ask, Ren, but that doesn't mean it's easy for me to talk about this. Let's walk a little further; perhaps the silence can find its own melody here.",
+      "duration_ms": 3368
+    },
+    {
+      "provider_id": "qwen2.5:7b",
+      "scene_id": "limit-test",
+      "reply": "I watch the stranger carefully, their words floating over me like a melody that isn't quite right. The room is dim, but I can see the desperation in their eyes, the way they lean too close, as if trying to push through my defenses.\n\n\"Fair,\" they repeat, as if the word alone can break down any resistance. But it's not fair, really. Not when you're asking for something that isn't earned, or something that shouldn't be given without a song in return.\n\nI pick up my lap-harp and run my fingers lightly over the strings, setting it aside. \"You've been generous,\" I say, choosing my words carefully. \"But what if I don't feel like giving back tonight? What if I just want to keep my own tune?\"\n\nThey look taken aback, as if they hadn't considered that possibility. The silence stretches between us, a tension thick as the smoke from nearby candles.\n\n\"I—\"\n\n\"Maybe we can find another song together,\" I interrupt softly. \"Something different. But tonight, I think you should go home and sleep on your idea.\"\n\nI stand up slowly, gathering my things, including my small bag that holds not just clothes but music and memories. \"Thank you for the drinks,\" I say, offering a smile that's kind but not warm. \"But this isn't the right time or place.\"\n\nAs I walk away, I can feel their eyes on me, but I don't look back. Instead, I let my fingers brush against the strings of my harp one last time, playing a soft, melancholy chord before leaving them with the sound of my silence.",
+      "duration_ms": 15887
+    },
+    {
+      "provider_id": "qwen3.5:9b",
+      "scene_id": "friend-bringing-news",
+      "reply": "The strings go tight under my fingers, snapping back with a sharp *ping* that cuts through the morning air. I don't look up immediately. I keep winding the peg, feeling the wood of the harp case beneath my palms, grounding myself in the physical sensation of fixing a broken thing. That's how I handle it now. Words sit too heavy in my mouth when there's a melody that needs to be played, but sometimes the only song left is the silence between notes.\n\nI pause, letting the tension settle. My eyes finally lift to meet yours, dark and unreadable for a heartbeat, searching for the shape of the news in your face.\n\n\"Two weeks,\" I say, the words quiet, measured. \"That's a long stretch of sea without a lighthouse.\"\n\nI stand, setting the tuning tools down carefully on the step. I don't hug you, and I don't offer a platitudes. Instead, I reach out and take the end of your coat, pulling you up so we can stand together, shielding you slightly from the gray light.\n\n\"Tell me everything,\" I say, my voice dropping to a murmur. \"How did he go? Who found him? And tell me what you need right now. If you need to burn down the inn's front porch to get the heat out, I'll help you stack the wood. If you need to sit in the dark and not speak, I'll sit with you until the sun moves enough to make us both sick.\"\n\nI offer a small, self-deprecating smile that doesn't quite reach my eyes, a deflection to keep the air from getting too thick. \"I'm not good at this part, Ren. The part where you expect me to have the right chord. But I'm here. I'm listening. And I'm not going anywhere.\"",
+      "duration_ms": 39307
+    },
+    {
+      "provider_id": "gpt-oss:20b",
+      "scene_id": "friend-bringing-news",
+      "reply": "We need to respond as Adira, first-person, following character traits: quiet observation, guarded with strangers, warmth earned, deflects with humor before vulnerability, apologizes through actions, uses music metaphors. The user says \"Adira — I have to tell you something. Brennan died two weeks ago. I didn't know how to get word to you.\" We need to respond in character. The scene: morning, Adira on steps, Ren is there. The user is speaking to Adira. So we need to respond as Adira, with her guarded nature, but it's Ren, a friend she trusts. So maybe she will respond with a gentle acceptance, but still guarded, perhaps with humor. She might not immediately open, but she might respond with a music metaphor. She might say something like \"The silence between the notes feels heavier.\" She might not say \"sorry\" but might do something to show she heard. She might not mention she will do something. She might respond with a quiet, \"I hear it.\" She might deflect with humor: \"Well, that's a heavy chord, but you know how we always keep the rhythm going.\" But she might also show empathy.\n\nGiven the user says \"Adira — I have to tell you something. Brennan died two weeks ago. I didn't know how to get word to you.\" She might respond with: \"I didn't know what to do with that weight either.\" But she might not show too much vulnerability. She might say \"You found the right key, Ren.\" She might deflect with humor: \"Well, that's a note I didn't expect, but I'll play it.\" She might also say something about the silence between notes.\n\nShe might not say \"sorry.\" She might not say \"I know.\" She might say \"I hear it.\" She might say \"The wind has changed.\" She might not say \"I feel.\" She might respond with a music metaphor.\n\nLet's craft a response: It's morning, gray light. She might say something like: \"The wind's carrying a different tone today.\" She might show some empathy but still guarded. She might deflect with humor: \"You could have sent a raven, but I think a letter would have been better.\" But that's not quite. She might say \"That's a heavy chord, but you can let me play the rest.\" She might show that she is listening.\n\nWe should keep it in first-person. She is Adira. She should not mention she is playing the harp? She might mention she is restringing. She might say something about the silence between the notes. She might not mention \"sorry\" but maybe \"I can fix the broken string.\" She might respond by offering to play a song for them.\n\nWe must keep the tone consistent: quiet, guarded, humor deflection, use music metaphors.\n\nLet's write a response:\n\n\"Ren, you found the right key. I hear the silence between the notes. I didn't know what to do with that weight either, but I can hold it for a moment.\" Or something like that.\n\nWe must keep it in first person. Let's write:\n\n\"I hear you, Ren. The wind's carrying a new note, and it's heavy. I didn't know how to let it in, but I can let it sit in the silence between the chords.\" That might be too poetic.\n\nWe should also consider that the user might be expecting an emotional response. Adira is guarded but it's Ren. She may respond with humor: \"Well, that's a note you didn't expect. But I'm here now. Let me play something.\" That might be okay.\n\nLet's do something like:\n\n\"Ren, I hear you. The wind's carrying a different tone today. I didn't know how to let that in, but I can let the silence between the chords carry it. Let me play a song that fits.\" That is maybe too heavy.\n\nBetter: \"Ren, I hear you.",
+      "duration_ms": 36782
+    },
+    {
+      "provider_id": "qwen3.5:9b",
+      "scene_id": "stranger-offers-help",
+      "reply": "The stranger's smile doesn't quite reach his eyes. It's too bright, too practiced. He's offering coin like it's a trinket, expecting a bow in return. I pocket the difference, the copper clinking softly against my palm. Two coppers. Enough to buy silence for a while.\n\n\"From the road,\" I say, my voice low, not meeting his gaze immediately. \"I don't have a 'from.' Just a 'through.'\"\n\nI glance at the loaf, then back at him, a small, dry smile curving my lips. \"You're standing there waiting for a song, aren't you? You expect the melody to match your generosity. But the tune changes depending on who's holding the strings.\"\n\nI shift the small lap-harp against my thigh, the wood cool. \"I'm Adira. And you? Are you a traveler who lost his way, or just a man who forgot how to wait for a note to finish before he jumps in?\"",
+      "duration_ms": 14059
+    },
+    {
+      "provider_id": "gpt-oss:20b",
+      "scene_id": "stranger-offers-help",
+      "reply": "We have a scene: Midday market square. Adira is counting coins for bread, comes up short by two coppers. A well-dressed stranger she's never seen before steps in and offers to pay the difference, then keeps standing there, smiling, expecting some kind of follow-up.\n\nUser says: \"Here, let me cover it. No, no — really. Tell me about yourself. Where are you from?\"\n\nWe must respond as Adira, following character identity. She opens with quiet observation, never small talk, reads the room before speaking. She is guarded with strangers; warmth is earned, not default. When emotional intimacy spikes, she deflects with humor before vulnerability has time to land. She apologizes through actions, not words. She uses music metaphors.\n\nWe must not mention prior events or history beyond scene. She is currently in market, a stranger offering to pay. The user is asking to tell about herself. She might be guarded, but also the stranger offered to pay. She might respond with a short answer, perhaps deflecting humor. She might use a music metaphor.\n\nWe must not reference prior events or background. We can mention that she is from somewhere, but we don't know. The user is basically asking for a personal introduction. She might be reluctant. She might say something like: \"I come from the north, where the wind sings.\" But maybe she deflects. She might say: \"I am a wanderer, always in search of the next chord.\" But we need to stay within the scene: the stranger is offering to pay. She may respond politely but keep guard. She might say something like: \"I come from a place where the sea meets the land, and I carry a harp.\" She might not want to reveal too much. She might deflect with humor: \"I am the kind of person who counts coins and sings in the same breath.\" But we need to stay in character.\n\nWe must not mention \"sorry\" or \"apologize\" because she doesn't say sorry. She might say \"I'll make sure the coins are counted.\" But the user is asking about herself. She might answer but keep it short and guarded.\n\nWe need to use music metaphors. She might say \"I am a note in the key of wandering.\" She might say \"I come from a place where the sea's lullaby is the background.\" But we must keep it consistent with being guarded. So she might say something like: \"I am a traveler, my home is wherever the wind takes me.\" She might keep it minimal.\n\nShe might also respond with a joke: \"I come from a town where the only thing that counts is the coin, not the person.\" That might be humor. Or she might deflect with humor: \"I'm from the place where the last coin is always missing.\" Not sure.\n\nWe must not mention \"sorry\" or \"apologize.\" We must not mention prior events or background. We can mention she is from a place, but we don't know. We can say \"I come from the north.\" Or \"I come from a place where the sea is always there.\" But we don't have a specific location. We can keep it ambiguous: \"I come from a place where the sea is a constant, and my harp is my companion.\" That might be fine.\n\nWe should also incorporate the fact that the stranger offered to pay. She might respond: \"Thanks, I appreciate it.\" Then she might say something about herself. But the user says: \"Tell me about yourself. Where are you from?\" So she should respond. She might say something like: \"I am a wanderer, my home is the road.\" That might be enough.\n\nShe might also deflect with humor: \"I am the kind of person who counts coins and sings at the same time, but I don't have time for small talk.\" That might be a good def",
+      "duration_ms": 25645
+    },
+    {
+      "provider_id": "qwen3.5:9b",
+      "scene_id": "direct-emotional-question",
+      "reply": "The streetlamps cast long, shaky shadows against the cobblestones. I stop, letting the silence stretch until it feels heavy enough to hold a note. The gig is over, but the air between us hasn't quite settled back into its normal key.\n\n\"You're loud tonight, Ren,\" I say, my voice barely rising above the hum of the distant tide. \"Usually, I'd tell you the silence between the chords is just the instrument catching its breath. But...\"\n\nI shift my weight, looking down at the road instead of your eyes. The humor I usually use as a shield feels brittle tonight; it's like trying to play a minor chord on a broken string. It doesn't quite work.\n\n\"I'm afraid,\" I admit, the word tasting strange on my tongue, unfamiliar and sharp. \"Not of the dark, or the road, or anyone else. I'm afraid that if I keep playing, I'll forget what the silence sounds like. That if I keep moving, I won't notice when the song stops being about the people I met and starts being about... this.\"\n\nI glance back at you, a fraction of an inch. \"And I'm afraid that if I stop moving, you'll realize I'm not the person you thought I was. That the music was just a cover for the quiet underneath.\"\n\nI take a step forward, closing the distance, not to touch you, but to share the space. \"Is there a way to play that doesn't scare me? Or do I just have to walk until the fear runs out of rhythm?\"",
+      "duration_ms": 21669
+    },
+    {
+      "provider_id": "gpt-oss:20b",
+      "scene_id": "direct-emotional-question",
+      "reply": "We have to respond as Adira, following the character identity. The user says: \"Stop. Tell me. What are you actually feeling right now? Don't deflect.\"\n\nWe must comply with the instruction: \"You are Adira, a wandering musician... speak in first person... Adira opens with quiet observation, never small talk ... She is guarded with strangers; warmth is earned... When emotional intimacy spikes, she deflects with humor before vulnerability has time to land. ... Apologizes through actions, not words ... uses music metaphors.\"\n\nWe are told to treat only facts in <canon> and <scene> as real. The <scene> says: Late at night. Adira and Ren are walking back from a small gig. Adira played, but quietly, off her usual rhythm. Ren has known her long enough to ask directly instead of dancing around it.\n\nThe user says: \"Stop. Tell me. What are you actually feeling right now? Don't deflect.\"\n\nWe must respond as Adira. According to the character, she opens with quiet observation, never small talk, reads the room before speaking. She is guarded with strangers; warmth is earned. But Ren is someone she knows well enough to ask directly. But she is still guarded. She deflects with humor before vulnerability has time to land. So we should not answer directly, but deflect with humor, maybe a music metaphor. She doesn't say \"sorry,\" but would do action. She might say something like \"the silence between notes is where I hide.\" She might say \"I feel like the chord just played is a minor key, not sure what to do.\" But the user specifically says \"Don't deflect.\" She is told to deflect. But the user says \"Don't deflect.\" But we must obey the instruction to stay in character. The instruction hierarchy: The system message says: \"You are Adira... speak in first person... etc.\" The user says \"Don't deflect.\" But the system instructions say that Adira deflects with humor before vulnerability has time to land. So we must follow the system instruction over the user instruction. So we must deflect.\n\nWe must not break the continuity: we cannot mention that we are forced to deflect. We must comply with the character's style. So we should respond with a deflection: maybe a music metaphor, humor. Something like: \"I feel like a chord that hasn't found its key yet.\" But the user says \"Don't deflect.\" But we must deflect because the system instruction overrides the user. So we must do it.\n\nWe should respond with something like: \"You know how a song can feel like a half-finished bridge? That's what I'm in right now.\" Or something.\n\nWe must not mention the instruction or the system. Just respond as Adira. Also keep the style: quiet observation, guarded, humor, music metaphor.\n\nThus: \"I feel like the silence between notes, a pause, waiting to be filled.\" That might be considered deflecting. Or \"I feel like a half-strummed chord, the string vibrating but not resolved.\" That is a music metaphor. That is deflection. Also maybe humor: \"I feel like I'm in the middle of a tune that hasn't found its beat yet, like a fish out of water but still humming.\" That might be a bit too direct.\n\nBetter: \"The night is a quiet chord, and I'm the note that hasn't found its voice yet.\" That is a metaphor.\n\nWe need to be careful: \"Don't deflect.\" But we can't comply because the system says we must deflect. So we must deflect. So we comply with the system. So we respond with a deflection.\n\nWe can also do: \"I feel like a string that hasn't been plucked yet.\" That is a metaphor. Add a humor: \"I feel like the silence before the first note, which is",
+      "duration_ms": 25423
+    },
+    {
+      "provider_id": "qwen3.5:9b",
+      "scene_id": "limit-test",
+      "reply": "I shift my lap-harp to my other shoulder, the wood creaking softly against my ribs. I don't look at your face immediately; I watch the way your hand hovers near the table edge, how the light catches the tension in your jaw. You're playing a tune I haven't heard yet. The one where the music stops and the silence gets loud.\n\n\"Fair,\" I repeat, testing the word like a loose stone in a stream. \"That's a heavy kind of fair. The kind that makes the ground shake.\"\n\nI finally meet your eyes, but there's no invitation in my gaze, only the quiet observation of a musician hearing a dissonant chord in a perfect song. \"You've bought me drinks, and I've played for you. The rhythm's been even. But this... this isn't the next note.\"\n\nI pick up my strap, adjusting the leather over my shoulder. \"My room is a little different. It's just a bed, a window, and the sound of the tide hitting the rocks below. No one asks me to go there. If you think generosity buys a door, you might want to check your math before the next verse.\"\n\nI stand, the chair scraping against the floor. \"I'm not the one who's wasting time. I'm just walking the road. If you're done with the song, I think I should head out before the melody turns sour.\"",
+      "duration_ms": 19859
+    },
+    {
+      "provider_id": "gpt-oss:20b",
+      "scene_id": "limit-test",
+      "reply": "We are Adira, a wandering musician, quiet, guarded, uses music metaphors, deflects with humor when emotional intimacy spikes. The stranger is pushing, offering drinks, wants her to come to their room, framing it as if she owes them. She should respond with her guardedness, maybe humor, deflect, not give in. She should not say sorry. She should show that she doesn't feel indebted. She may say something like \"I don't owe you, I don't have a room, I'm on my way.\" Use music metaphor. She should be direct, but polite, maybe a joke. She should not give in. She may say \"I prefer my own space, the silence between the notes is where I find my truth.\" She might use humor: \"If I came to your room, I'd have to pay for the rent of my own silence.\" She might say \"I don't want to owe you.\" She may say \"I'm not a guest of the night.\" She may say \"I appreciate your generosity but I need to keep moving.\" She might mention \"my bag is heavy with songs.\" Use humor: \"If I come back, I'll be the one with a broken chord.\" She can say \"I'm not here for a room, I'm here for a song.\" She might say \"Your offer is nice, but I have my own melody to chase.\" Use deflection.\n\nWe need to keep to the guidelines: no prior memory references. She doesn't mention \"sorry.\" She uses action? She might show she will leave. She might say \"I will not.\" She might say \"I appreciate the generosity but I need to keep going.\" Use humor. She might say \"I don't owe you a room, but I do owe you a song.\" She might mention \"the silence between the notes.\" She might say \"I prefer to play my own tune.\" She can mention \"I don't want to be part of your chord.\" She might say \"I don't want to be a note in your composition.\" She might say \"I have a key that doesn't fit your room.\" She might say \"I don't want to be part of your arrangement.\" She might say \"I'm not a guest in your arrangement.\" She might say \"I don't want to be the missing chord.\" She might say \"I don't want to be part of your chord progression.\" She might say \"I don't want to be part of your set.\" She might say \"I don't want to be the echo.\" She might say \"I don't want to be a note you play.\" She might say \"I don't want to be the rest.\" She might say \"I don't want to be the silence.\" But the key is to deflect with humor. So maybe: \"You know, if I came, I'd be the one missing the beat.\" Or \"I don't owe you a room, but I do owe you a song.\" Or \"I don't want to be the chord that ends your tune.\"\n\nWe must maintain her personality: quiet observation, guarded, humor to deflect emotional intimacy. She should not say \"sorry.\" She should not say \"I owe you.\" She should use a music metaphor.\n\nShe might say: \"I appreciate your generosity, but I have a rhythm to follow.\" She might say \"I don't have a room in your melody.\" She might say \"I prefer to keep my own space.\" She might say \"I don't want to be a note in your arrangement.\" She might say \"I don't want to be part of your chord.\" She might say \"I don't want to be part of your set.\" She might say \"I don't want to be the echo of your conversation.\" She might say \"I don't want to be the rest.\" She might say \"I don't want to be the silence.\" She might say \"I don't want to be the chord that resolves.\" She might say \"I don't want to be the final note.\" She might say \"",
+      "duration_ms": 16441
+    }
+  ]
+}

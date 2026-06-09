@@ -105,7 +105,7 @@ The pillars are sequentially dependent:
 3. **Pillar 3 (identity inspector)** — visualizes Pillars 1 + 2.
 4. **Pillar 4 (benchmark)** — validates that 1 + 2 actually produce consistent character across LLMs.
 
-All four shipped in one session (commits `a26992c` → `bf1b50b` → `c78489f` → see this commit for Pillar 4). The substrate is real; the next step is running the benchmark against real provider configurations and publishing the results.
+All four shipped in one session (commits `a26992c` → `bf1b50b` → `c78489f` → see this commit for Pillar 4). The substrate is real; results from the first benchmark run are in [CHARACTER-EMERGENCE-RESULTS.md](./CHARACTER-EMERGENCE-RESULTS.md).
 
 ## What this enables
 
