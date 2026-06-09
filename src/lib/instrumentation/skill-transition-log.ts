@@ -4,7 +4,30 @@
 //
 // Kept separate so the memory-promotion telemetry contract stays clean.
 
-export type SkillState = "candidate" | "active" | "suppressed" | "archived";
+/** Skill state machine.
+ *
+ *  candidate → active     net ≥ +3 across ≥2 distinct sessions
+ *  active    → suppressed last 5 outcomes net ≤ -2
+ *  suppressed → archived  no outcome activity for 7 days
+ *  any       → archived   explicit user action
+ *
+ *  Phase 11 addition:
+ *  active    → core_trait quantitative criteria (net ≥ 8 across ≥4 sessions,
+ *                          ≥7 days active, success_rate ≥ 0.6) AND a
+ *                          background LLM verifier accepts this as an
+ *                          identity pattern (not just a situational skill).
+ *                          Core traits inject unconditionally into every
+ *                          system prompt as a <character_identity> block —
+ *                          they apply across context, not just when
+ *                          retrieval keys fire.
+ *  core_trait → active    success_rate drops below 0.3 over 30 days OR
+ *                          user explicitly retcons the trait. */
+export type SkillState =
+  | "candidate"
+  | "active"
+  | "core_trait"
+  | "suppressed"
+  | "archived";
 
 export interface SkillTransitionEntry {
   at: string; // ISO
@@ -16,7 +39,9 @@ export interface SkillTransitionEntry {
     | "threshold_met"
     | "negative_streak"
     | "idle_window"
-    | "user_action";
+    | "user_action"
+    | "crystallized_to_core_trait"
+    | "decrystallized_to_active";
   net_score: number;
   total_outcomes: number;
   distinct_sessions: number;

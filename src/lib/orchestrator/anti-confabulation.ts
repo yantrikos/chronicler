@@ -45,6 +45,13 @@ export interface SystemPromptOptions {
   /** User-typed identity notes (sub/dom/role labels). Manual-only;
    *  never auto-generated. Rendered as <identity_notes> when set. */
   identityNotes?: string;
+  /** Phase 11: crystallized core traits — skills that have promoted past
+   *  `active` to `core_trait` via the LLM verifier. Inject unconditionally
+   *  in every system prompt (independent of retrieval relevance) under a
+   *  <character_identity> block positioned BEFORE canon. Identity precedes
+   *  context. Top-K cap (default 7) applied to ranked traits to bound
+   *  prompt growth — see Phase 11 design doc. */
+  coreTraits?: string[];
 }
 
 export function withAntiConfabulation(
@@ -108,6 +115,24 @@ export function withAntiConfabulation(
     parts.push(
       `<identity_notes>\n${opts.identityNotes.trim()}\n</identity_notes>`
     );
+  }
+  // Phase 11 Pillar 1: crystallized core identity traits. Always-on
+  // (unconditional injection regardless of retrieval). Positioned LATE in
+  // the system prompt — right before the anti-confab clause — so the
+  // identity statement lands as the last context the model reads before
+  // the canon + scene messages arrive. Identity precedes context.
+  if (opts.coreTraits && opts.coreTraits.length > 0) {
+    const TOP_K = 7;
+    const trimmed = opts.coreTraits
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .slice(0, TOP_K);
+    if (trimmed.length > 0) {
+      const bullets = trimmed.map((t) => `  - ${t}`).join("\n");
+      parts.push(
+        `<character_identity>\nYou ARE these things, not just behaving them. They apply across every scene — battle, tavern, funeral — regardless of context. The model voice may vary across providers; these traits do not.\n\n${bullets}\n</character_identity>`
+      );
+    }
   }
   parts.push(ANTI_CONFABULATION_CLAUSE);
   return parts.join("\n\n");

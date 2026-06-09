@@ -85,6 +85,9 @@ import {
   loadCharacterResourceOptIn,
   resolveEnabledResources,
 } from "./lib/mcp/resource-opt-in";
+import { listCoreTraitsForCharacter } from "./lib/skills/core-trait-promotions";
+import { CoreTraitVerifier } from "./lib/skills/core-trait-verifier";
+import { CoreTraitPromoter } from "./lib/skills/core-trait-promoter";
 import {
   SkillOutcomeTracker,
   type SkillObservation,
@@ -349,6 +352,11 @@ function App() {
   const skillFormerRef = useRef<SkillFormer | null>(null);
   const driftFormerRef = useRef<DriftFormer | null>(null);
   const preferenceFormerRef = useRef<PreferenceFormer | null>(null);
+  /** Phase 11 Pillar 1: verifier + promoter for core-trait crystallization.
+   *  Built alongside the other formers in rebuildRuntime. Promoter runs
+   *  on session-start per character via runCoreTraitPromotion(). */
+  const coreTraitVerifierRef = useRef<CoreTraitVerifier | null>(null);
+  const coreTraitPromoterRef = useRef<CoreTraitPromoter | null>(null);
   /** Grimoire plugin host. Lives across rebuilds (its state — loaded
    *  plugins, hook registrations, slash commands — survives provider/config
    *  changes). The orchestrator picks it up by ref. */
@@ -628,6 +636,11 @@ function App() {
         vp,
         xp.model
       );
+      coreTraitVerifierRef.current = new CoreTraitVerifier(vp, xp.model);
+      coreTraitPromoterRef.current = new CoreTraitPromoter(
+        clientRef.current,
+        coreTraitVerifierRef.current
+      );
     } else if (p && p.kind !== "mock") {
       conflictVerifierRef.current = new ConflictVerifier(provider, p.model);
       skillFormerRef.current = new SkillFormer(
@@ -645,11 +658,18 @@ function App() {
         provider,
         p.model
       );
+      coreTraitVerifierRef.current = new CoreTraitVerifier(provider, p.model);
+      coreTraitPromoterRef.current = new CoreTraitPromoter(
+        clientRef.current,
+        coreTraitVerifierRef.current
+      );
     } else {
       conflictVerifierRef.current = null;
       skillFormerRef.current = null;
       driftFormerRef.current = null;
       preferenceFormerRef.current = null;
+      coreTraitVerifierRef.current = null;
+      coreTraitPromoterRef.current = null;
     }
     // The outcome tracker is provider-independent — it just talks to
     // YantrikDB. Always build it; even in MockProvider mode it correctly
@@ -1144,10 +1164,11 @@ function App() {
     // Sort active first, then candidate, then suppressed/archived. Within
     // each group, most-used first.
     const order: Record<SkillState, number> = {
-      active: 0,
-      candidate: 1,
-      suppressed: 2,
-      archived: 3,
+      core_trait: 0,
+      active: 1,
+      candidate: 2,
+      suppressed: 3,
+      archived: 4,
     };
     out.sort(
       (a, b) => order[a.state] - order[b.state] || b.uses - a.uses
@@ -1315,6 +1336,7 @@ function App() {
       await refreshThinkPanel(`character:${primary.id}`);
       await runDriftFormation();
       await runPreferenceFormation();
+      await runCoreTraitPromotion();
       await refreshSkills();
       await refreshPreferences();
     } finally {
@@ -1434,6 +1456,32 @@ function App() {
     return s;
   }
 
+  /** Phase 11 Pillar 1: run the core-trait promotion sweep for every
+   *  active character. Promotes eligible active skills to `core_trait`
+   *  and demotes any whose success rate has decayed. Non-blocking;
+   *  failures are logged but don't surface. */
+  async function runCoreTraitPromotion(): Promise<void> {
+    const promoter = coreTraitPromoterRef.current;
+    if (!promoter || characters.length === 0) return;
+    for (const char of characters) {
+      try {
+        const result = await promoter.run({
+          character_id: char.id,
+          character_name: char.name,
+        });
+        if (result.promoted.length > 0 || result.demoted.length > 0) {
+          console.log(
+            `[core-traits] ${char.name}: ${result.promoted.length} crystallized, ` +
+              `${result.demoted.length} demoted, ${result.rejected.length} rejected ` +
+              `(${result.skipped_quantitative} skipped by criteria)`
+          );
+        }
+      } catch (e) {
+        console.warn(`[core-traits] ${char.name} promotion failed`, e);
+      }
+    }
+  }
+
   async function refreshPreferences(): Promise<void> {
     if (characters.length === 0) {
       setInspectedPreferences([]);
@@ -1521,6 +1569,29 @@ function App() {
    *  rows reach the prompt — observed/candidate/dismissed are inspector-
    *  only. The trailing "tendencies not rules" instruction is appended
    *  by withAntiConfabulation when any bucket has content. */
+  /** Phase 11 Pillar 1: pull the character's crystallized core traits
+   *  ranked highest first, capped at TOP_K (7 — Miller's number). Bodies
+   *  are fetched live from `inspectedSkills` since the skill list is the
+   *  authoritative source; the promotions map only carries the verifier
+   *  verdict + rank + crystallization metadata. */
+  function deriveCoreTraitsForCharacter(
+    characterId: string
+  ): string[] | undefined {
+    const TOP_K = 7;
+    const promotions = listCoreTraitsForCharacter(characterId);
+    if (promotions.length === 0) return undefined;
+    const skillsById = new Map(
+      inspectedSkills.map((s) => [s.skill_id, s.body])
+    );
+    const traits: string[] = [];
+    for (const p of promotions) {
+      const body = skillsById.get(p.skill_id);
+      if (body && body.length > 0) traits.push(body);
+      if (traits.length >= TOP_K) break;
+    }
+    return traits.length > 0 ? traits : undefined;
+  }
+
   function derivePromptedPreferences(
     characterId: string
   ): { ordinary: string[]; private: string[]; limits: string[] } | undefined {
@@ -2253,6 +2324,7 @@ function App() {
           intensitySnippet: effectiveIntensitySnippet(activeIntensityId),
           preferences: derivePromptedPreferences(speakerChar.id),
           identityNotes: loadIdentityNotes(speakerChar.id) || undefined,
+          coreTraits: deriveCoreTraitsForCharacter(speakerChar.id),
           allowedTools: resolveAllowedTools(loadCharacterGating(speakerChar.id)),
           mcpEnabledResources: resolveEnabledResources(
             loadCharacterResourceOptIn(speakerChar.id)

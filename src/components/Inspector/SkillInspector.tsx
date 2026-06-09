@@ -39,6 +39,8 @@ interface Props {
 const stateStyle: Record<SkillState, string> = {
   candidate: "border-amber-500/40 bg-amber-500/5",
   active: "border-emerald-500/40 bg-emerald-500/5",
+  core_trait:
+    "border-fuchsia-500/60 bg-fuchsia-500/10 ring-1 ring-fuchsia-500/30",
   suppressed: "border-slate-500/40 bg-slate-500/5 opacity-60",
   archived: "border-neutral-700 bg-neutral-900/40 opacity-40",
 };
@@ -46,6 +48,7 @@ const stateStyle: Record<SkillState, string> = {
 const statePill: Record<SkillState, string> = {
   candidate: "bg-amber-600 text-amber-50",
   active: "bg-emerald-600 text-emerald-50",
+  core_trait: "bg-fuchsia-600 text-fuchsia-50 font-semibold",
   suppressed: "bg-slate-600 text-slate-50",
   archived: "bg-neutral-700 text-neutral-200",
 };

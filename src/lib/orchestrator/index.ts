@@ -87,6 +87,12 @@ export class Orchestrator {
       };
       /** User-typed identity notes for this character. Manual-only. */
       identityNotes?: string;
+      /** Phase 11 Pillar 1: crystallized core trait bodies for the
+       *  speaker character. Inject unconditionally as `<character_identity>`
+       *  in the system prompt. See `src/lib/skills/core-trait-promoter.ts`
+       *  for derivation; App.tsx supplies the ranked list (top-K already
+       *  applied at the source). */
+      coreTraits?: string[];
       /** Per-character MCP tool allowlist (qualified names like
        *  "dice__roll"). When undefined, all enabled tools are exposed.
        *  When set (even to empty), filters the tools passed to the LLM
@@ -160,6 +166,7 @@ export class Orchestrator {
         intensitySnippet: opts?.intensitySnippet,
         preferences: opts?.preferences,
         identityNotes: opts?.identityNotes,
+        coreTraits: opts?.coreTraits,
       })
     );
 
