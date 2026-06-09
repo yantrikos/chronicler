@@ -95,6 +95,11 @@ import {
 } from "./lib/identity/self-model-substrate";
 import type { SelfModel } from "./lib/identity/self-model-types";
 import {
+  aggregateIdentity,
+  type InspectorIdentity,
+} from "./lib/identity/aggregator";
+import { IdentityInspector } from "./components/Inspector/IdentityInspector";
+import {
   SkillOutcomeTracker,
   type SkillObservation,
   deriveState,
@@ -369,6 +374,10 @@ function App() {
    *  include selfModel without an await. */
   const selfModelGeneratorRef = useRef<SelfModelGenerator | null>(null);
   const selfModelByCharacterRef = useRef<Map<string, SelfModel>>(new Map());
+  /** Phase 11 Pillar 3: identity inspector view-model. Recomputed when
+   *  skills/promotions/self-model change. */
+  const [inspectedIdentity, setInspectedIdentity] = useState<InspectorIdentity | null>(null);
+  const [isSelfModelRegenerating, setIsSelfModelRegenerating] = useState(false);
   /** Grimoire plugin host. Lives across rebuilds (its state — loaded
    *  plugins, hook registrations, slash commands — survives provider/config
    *  changes). The orchestrator picks it up by ref. */
@@ -600,12 +609,20 @@ function App() {
   // stale `characters` closure — useEffect waits until React has flushed
   // the state, so we query the right namespaces.
   useEffect(() => {
-    if (characters.length === 0) return;
+    if (characters.length === 0) {
+      setInspectedIdentity(null);
+      return;
+    }
     void refreshMemories();
     void refreshSkills();
     void refreshPreferences();
     void refreshThreads();
     void refreshThinkPanel(`character:${characters[0].id}`);
+    // Identity inspector view-model — recomputed from current substrates
+    // for the primary character.
+    setInspectedIdentity(
+      recomputeIdentity(characters[0].id, characters[0].name)
+    );
     // Relationship drift runs once per session/character change. The
     // DriftFormer's per-(character, target) cache prevents redundant
     // LLM calls during the same session. To re-evaluate after meaningful
@@ -1213,6 +1230,56 @@ function App() {
       )
     );
   }
+
+  /** Phase 11 Pillar 3 — identity inspector handlers. Disabling a core
+   *  trait keeps the YantrikDB substrate intact but writes a
+   *  `suppressed` override so deriveCoreTraitsForCharacter skips it on
+   *  injection. Re-enabling clears the override. */
+  function onDisableCoreTrait(skill_id: string): void {
+    skillOverridesRef.current = setSkillOverride(skill_id, "suppressed");
+    setInspectedIdentity((id) => (id ? recomputeIdentity(id.character_id, id.character_name) : id));
+  }
+  function onEnableCoreTrait(skill_id: string): void {
+    skillOverridesRef.current = clearSkillOverride(skill_id);
+    setInspectedIdentity((id) => (id ? recomputeIdentity(id.character_id, id.character_name) : id));
+  }
+
+  /** Manual regeneration trigger from the inspector. Fires the same
+   *  formation runner as session-start with manualRefresh: true. */
+  async function onRegenerateSelfModel(): Promise<void> {
+    if (isSelfModelRegenerating) return;
+    setIsSelfModelRegenerating(true);
+    try {
+      await runSelfModelFormation({ manualRefresh: true });
+      if (characters[0]) {
+        const updated = recomputeIdentity(characters[0].id, characters[0].name);
+        setInspectedIdentity(updated);
+      }
+    } finally {
+      setIsSelfModelRegenerating(false);
+    }
+  }
+
+  function recomputeIdentity(
+    characterId: string,
+    characterName: string
+  ): InspectorIdentity {
+    const disabled = new Set<string>();
+    for (const [skill_id, state] of skillOverridesRef.current) {
+      if (state === "suppressed" || state === "archived") disabled.add(skill_id);
+    }
+    return aggregateIdentity({
+      character_id: characterId,
+      character_name: characterName,
+      self_model: selfModelByCharacterRef.current.get(characterId) ?? null,
+      skills: inspectedSkills,
+      disabled_skill_ids: disabled,
+    });
+  }
+
+  /** Number of crystallized core traits for the primary character —
+   *  used by the inspector tab strip badge. */
+  const identityCoreTraitCount = inspectedIdentity?.core_traits.length ?? 0;
   function onSkillClearOverride(skill_id: string): void {
     skillOverridesRef.current = clearSkillOverride(skill_id);
     const derived = skillStateRef.current.get(skill_id) ?? "candidate";
@@ -3561,6 +3628,21 @@ function App() {
             >
               arcs{arcVisibleCount > 0 ? ` · ${arcVisibleCount}` : ""}
             </button>
+            {/* Phase 11 Pillar 3: identity tab. Distinct fuchsia accent
+              * to match the core_trait state badge. Always present so
+              * users can see "no traits yet" + understand the substrate. */}
+            <button
+              className={`flex-1 px-3 py-1.5 text-left ${
+                inspectorTab === "identity"
+                  ? "text-neutral-100 border-b-2 border-fuchsia-500/60"
+                  : "text-neutral-500 hover:text-neutral-300"
+              }`}
+              onClick={() => setInspectorTab("identity")}
+              title="Crystallized identity: self-model + core traits + timeline"
+            >
+              identity
+              {identityCoreTraitCount > 0 ? ` · ${identityCoreTraitCount}` : ""}
+            </button>
             {/* Grimoire-contributed inspector tabs. Re-renders when
               * grimoireVersion bumps (plugin load/unload). */}
             {grimoireHostRef.current?.slots.get("inspector:tab").map((c) => {
@@ -3662,6 +3744,14 @@ function App() {
                   setInspectorTab("memory");
                   void rid;
                 }}
+              />
+            ) : inspectorTab === "identity" ? (
+              <IdentityInspector
+                identity={inspectedIdentity}
+                onRegenerateSelfModel={onRegenerateSelfModel}
+                isRegenerating={isSelfModelRegenerating}
+                onDisableTrait={onDisableCoreTrait}
+                onEnableTrait={onEnableCoreTrait}
               />
             ) : inspectorTab.startsWith("grimoire:") ? (
               (() => {
