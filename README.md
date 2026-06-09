@@ -67,8 +67,9 @@ First-run flow:
 - **Anti-confabulation clause.** Prepended to every system prompt: "treat only the facts in `<canon>` and `<scene>` as real, do not reference prior events not in those sections." Combined with the visibility ACL, the model cannot invent memory it wasn't given.
 - **"Previously on..." recap at session start.** Pulled from consolidated canon, not raw chat history. Strict anti-confab prompting on the recap itself after we caught (and fixed) a real-world confabulation where the recap misattributed facts.
 - **Verified character learning.** Patterns the model shows repeatedly across sessions (deflection styles, conduct rules, decision rituals, lessons from past failures) get distilled into typed `skill_substrate` entries — but only after an LLM verifier passes on each candidate, biased toward rejection. Skills surface back into future prompts when relevant, score `+1` / `−1` from user reactions (regenerate / edit / delete vs accept and move on), and transition through `candidate → active → suppressed → archived` based on accumulated outcomes. There's a "Character development" tab next to "Memory" with approve / disable / archive controls; the local override always wins over the derived state. See [docs/LCDB-v0.md](docs/LCDB-v0.md) for the ablation harness that proves the contract holds.
+- **Crystallizing character identity** (Phase 11). Skills that hold up over weeks of sessions promote past `active` into a 5th state, `core_trait` — always-on identity facets like *"Adira is fundamentally guarded with strangers"* that inject into every system prompt unconditionally. Combined with a periodically-generated first-person self-model (*"I am Adira. I'm a wandering musician…"*), the substrate carries the character across LLMs. We measured it: same Adira through `qwen2.5:7b` and `qwen3.5:9b`, **σ=0.087** cross-provider on mean overall scores (moderate model-independence). The Identity inspector shows the crystallized traits + self-model + benchmark verdict. See [docs/CHARACTER-EMERGENCE.md](docs/CHARACTER-EMERGENCE.md) for the thesis and [docs/CHARACTER-EMERGENCE-RESULTS.md](docs/CHARACTER-EMERGENCE-RESULTS.md) for the run.
 
-All of the above is verified by automated tests: `three-day-continuity`, `auto-promote`, `secret-stays-private`, `session-replay`, `lorebook`, `extract`, `skill-former`, `skill-outcomes`, `lcdb-v0`, `mcp-connectivity`. Everything green.
+All of the above is verified by automated tests: `three-day-continuity`, `auto-promote`, `secret-stays-private`, `session-replay`, `lorebook`, `extract`, `skill-former`, `skill-outcomes`, `lcdb-v0`, `mcp-connectivity`, `core-trait-promoter`, `self-model-generator`, `identity-aggregator`, `cross-model-benchmark`. Everything green.
 
 For a head-to-head comparison against SillyTavern, RisuAI, and AgnAistic, see [docs/COMPARISON.md](docs/COMPARISON.md). Headline:
 
@@ -78,6 +79,7 @@ For a head-to-head comparison against SillyTavern, RisuAI, and AgnAistic, see [d
 | Anti-confabulation clause built into every prompt | ✅ | ❌ user adds | ❌ | ❌ |
 | Memory conflict detection + auto-resolve | ✅ | ❌ | ❌ | ❌ |
 | Skills + drift + preferences substrates (3 inspectors) | ✅ | ❌ | ❌ | ❌ |
+| **Model-independent character continuity** (substrate-driven) | ✅ Phase 11 (σ=0.087 within qwen family) | ❌ | ❌ | ❌ |
 | Prompt inspector with token budget + retrieval reasoning | ✅ | 🟡 structure only | 🟡 | ❌ |
 | Group-chat memory ACL (`visible_to`, retrieval-time filter) | ✅ | ❌ prompt-level | ❌ | ❌ |
 | Scene Intensity dropdown (first-class, no jailbreak) | ✅ | ❌ | ❌ | ❌ |

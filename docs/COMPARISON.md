@@ -37,6 +37,8 @@ Legend: ✅ first-class · 🟡 partial / via plugin · ❌ absent / not designe
 | Skills substrate (behavioral patterns) | ✅ verifier-gated, with state machine | ❌ | ❌ | ❌ |
 | Relationship drift (trust↑↓, dependency, openness, defensiveness) | ✅ axis labels, canon-grounded | ❌ | ❌ | ❌ |
 | Preferences substrate (likes / limits, intimate-aware) | 🟡 v0.2 — substrate + UI shipped; formation flaky on reasoning-model providers | ❌ | ❌ | ❌ |
+| Core traits + self-model (always-on identity layer, Phase 11) | ✅ 5th skill state `core_trait`, LLM-verified promotion, first-person self-model regenerated weekly | ❌ | ❌ | ❌ |
+| **Model-independent character continuity** (substrate carries character across LLMs) | ✅ measured σ=0.087 within qwen family (`docs/CHARACTER-EMERGENCE-RESULTS.md`); benchmark harness ships in-app | ❌ | ❌ | ❌ |
 | **Author tools** | | | | |
 | Author's note | ✅ with depth control | ✅ | ✅ | ✅ |
 | Scene Intensity dropdown (Neutral / Fade to Black / Tasteful / Explicit) | ✅ first-class | ❌ via jailbreak prompts | ❌ via author's note | ❌ |
