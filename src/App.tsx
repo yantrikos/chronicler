@@ -88,6 +88,12 @@ import {
 import { listCoreTraitsForCharacter } from "./lib/skills/core-trait-promotions";
 import { CoreTraitVerifier } from "./lib/skills/core-trait-verifier";
 import { CoreTraitPromoter } from "./lib/skills/core-trait-promoter";
+import { SelfModelGenerator } from "./lib/identity/self-model-generator";
+import {
+  loadSelfModel,
+  writeSelfModel,
+} from "./lib/identity/self-model-substrate";
+import type { SelfModel } from "./lib/identity/self-model-types";
 import {
   SkillOutcomeTracker,
   type SkillObservation,
@@ -357,6 +363,12 @@ function App() {
    *  on session-start per character via runCoreTraitPromotion(). */
   const coreTraitVerifierRef = useRef<CoreTraitVerifier | null>(null);
   const coreTraitPromoterRef = useRef<CoreTraitPromoter | null>(null);
+  /** Phase 11 Pillar 2: self-model generator + in-memory cache. The
+   *  generator runs on session-start alongside the promoter; the cache
+   *  feeds per-turn synchronous lookup so the orchestrator opts can
+   *  include selfModel without an await. */
+  const selfModelGeneratorRef = useRef<SelfModelGenerator | null>(null);
+  const selfModelByCharacterRef = useRef<Map<string, SelfModel>>(new Map());
   /** Grimoire plugin host. Lives across rebuilds (its state — loaded
    *  plugins, hook registrations, slash commands — survives provider/config
    *  changes). The orchestrator picks it up by ref. */
@@ -641,6 +653,7 @@ function App() {
         clientRef.current,
         coreTraitVerifierRef.current
       );
+      selfModelGeneratorRef.current = new SelfModelGenerator(vp, xp.model);
     } else if (p && p.kind !== "mock") {
       conflictVerifierRef.current = new ConflictVerifier(provider, p.model);
       skillFormerRef.current = new SkillFormer(
@@ -663,6 +676,7 @@ function App() {
         clientRef.current,
         coreTraitVerifierRef.current
       );
+      selfModelGeneratorRef.current = new SelfModelGenerator(provider, p.model);
     } else {
       conflictVerifierRef.current = null;
       skillFormerRef.current = null;
@@ -670,6 +684,7 @@ function App() {
       preferenceFormerRef.current = null;
       coreTraitVerifierRef.current = null;
       coreTraitPromoterRef.current = null;
+      selfModelGeneratorRef.current = null;
     }
     // The outcome tracker is provider-independent — it just talks to
     // YantrikDB. Always build it; even in MockProvider mode it correctly
@@ -1338,6 +1353,10 @@ function App() {
       await runPreferenceFormation();
       await runCoreTraitPromotion();
       await refreshSkills();
+      // Self-model regenerates AFTER core traits + refreshed skills land —
+      // core_trait promotions are its primary input, and we read trait
+      // bodies from the inspectedSkills list inside the formation runner.
+      await runSelfModelFormation();
       await refreshPreferences();
     } finally {
       setFormationRunning(false);
@@ -1454,6 +1473,80 @@ function App() {
       characterPrefSettingsRef.current.set(character_id, s);
     }
     return s;
+  }
+
+  /** Phase 11 Pillar 2: hydrate the in-memory self-model cache for
+   *  every active character from YantrikDB, then check each against
+   *  the generator's needsRefresh predicate. Regenerate + persist when
+   *  the inputs have shifted or the weekly refresh window elapsed.
+   *  Failures are logged; the cache keeps the prior model so per-turn
+   *  injection doesn't break on generation errors. */
+  async function runSelfModelFormation(
+    opts: { manualRefresh?: boolean } = {}
+  ): Promise<void> {
+    const generator = selfModelGeneratorRef.current;
+    if (!generator || characters.length === 0) return;
+    const client = clientRef.current;
+    for (const char of characters) {
+      try {
+        const existing = await loadSelfModel(client, char.id);
+        if (existing) selfModelByCharacterRef.current.set(char.id, existing);
+
+        const coreTraits = listCoreTraitsForCharacter(char.id).map((p) => {
+          const skill = inspectedSkills.find(
+            (s) => s.skill_id === p.skill_id
+          );
+          return {
+            skill_id: p.skill_id,
+            body: skill?.body ?? "",
+            rank: p.promotion.rank,
+          };
+        });
+        // Without crystallized traits the self-model has no anchor — skip
+        // until Pillar 1 lands for this character.
+        if (coreTraits.length === 0) continue;
+
+        const inputs = {
+          character_id: char.id,
+          character_name: char.name,
+          core_traits: coreTraits.filter((t) => t.body.length > 0),
+          canon_excerpts: [] as string[],
+          drift_summary: "",
+          active_preferences:
+            derivePromptedPreferences(char.id)?.ordinary ?? [],
+        };
+
+        const needs = await generator.needsRefresh(existing, inputs, {
+          manualRefresh: opts.manualRefresh,
+        });
+        if (!needs) continue;
+
+        const generated = await generator.generate(inputs);
+        if (!generated) {
+          console.warn(
+            `[self-model] ${char.name}: generation returned null (LLM error or non-first-person output)`
+          );
+          continue;
+        }
+        await writeSelfModel(client, generated);
+        selfModelByCharacterRef.current.set(char.id, generated);
+        console.log(
+          `[self-model] ${char.name}: generated ${generated.header.paragraph_count}-paragraph self-model`
+        );
+      } catch (e) {
+        console.warn(`[self-model] ${char.name} formation failed`, e);
+      }
+    }
+  }
+
+  /** Phase 11 Pillar 2: per-turn lookup. Reads from the in-memory cache
+   *  hydrated by runSelfModelFormation. No-op when no model exists. */
+  function deriveSelfModelForCharacter(
+    characterId: string
+  ): string | undefined {
+    const model = selfModelByCharacterRef.current.get(characterId);
+    const body = model?.body?.trim();
+    return body && body.length > 0 ? body : undefined;
   }
 
   /** Phase 11 Pillar 1: run the core-trait promotion sweep for every
@@ -2325,6 +2418,7 @@ function App() {
           preferences: derivePromptedPreferences(speakerChar.id),
           identityNotes: loadIdentityNotes(speakerChar.id) || undefined,
           coreTraits: deriveCoreTraitsForCharacter(speakerChar.id),
+          selfModel: deriveSelfModelForCharacter(speakerChar.id),
           allowedTools: resolveAllowedTools(loadCharacterGating(speakerChar.id)),
           mcpEnabledResources: resolveEnabledResources(
             loadCharacterResourceOptIn(speakerChar.id)

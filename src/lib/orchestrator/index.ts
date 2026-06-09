@@ -93,6 +93,10 @@ export class Orchestrator {
        *  for derivation; App.tsx supplies the ranked list (top-K already
        *  applied at the source). */
       coreTraits?: string[];
+      /** Phase 11 Pillar 2: the character's first-person self-model
+       *  paragraph. Injected as `<self_model>` immediately after
+       *  `<character_identity>`. See `src/lib/identity/self-model-substrate.ts`. */
+      selfModel?: string;
       /** Per-character MCP tool allowlist (qualified names like
        *  "dice__roll"). When undefined, all enabled tools are exposed.
        *  When set (even to empty), filters the tools passed to the LLM
@@ -167,6 +171,7 @@ export class Orchestrator {
         preferences: opts?.preferences,
         identityNotes: opts?.identityNotes,
         coreTraits: opts?.coreTraits,
+        selfModel: opts?.selfModel,
       })
     );
 
