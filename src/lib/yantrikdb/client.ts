@@ -67,6 +67,104 @@ function metadataForYantrik(
   return { ...metadata };
 }
 
+// ── Error handling ─────────────────────────────────────────────────
+//
+// YantrikDB reports tool errors as a plain-string payload of the form
+// "Error executing tool <name>: <reason>" in the `result` field. Our
+// old code called JSON.parse on that unconditionally and surfaced the
+// resulting SyntaxError to the UI ("Unexpected token 'E', 'Error exec'…").
+// YantrikError parses those payloads into a typed exception, and
+// parseYantrikResult is the safe replacement for `JSON.parse(res.result)`.
+
+export type YantrikErrorKind =
+  | "queue_full"     // ingest queue at capacity — retryable
+  | "not_found"      // resource doesn't exist
+  | "server_error"   // generic tool-execution failure
+  | "malformed";     // response wasn't a JSON-decodable string
+
+export class YantrikError extends Error {
+  constructor(
+    readonly kind: YantrikErrorKind,
+    readonly tool: string,
+    readonly serverMessage: string,
+    readonly rawResult?: string
+  ) {
+    super(`YantrikDB ${tool} failed (${kind}): ${serverMessage}`);
+    this.name = "YantrikError";
+  }
+}
+
+/** Classify a `"Error executing tool …"` server payload into a typed kind. */
+function classifyServerError(msg: string): YantrikErrorKind {
+  const lower = msg.toLowerCase();
+  if (lower.includes("ingest queue full") || lower.includes("queue full"))
+    return "queue_full";
+  if (lower.includes("not found") || lower.includes("no such"))
+    return "not_found";
+  return "server_error";
+}
+
+/** Parse a YantrikDB tool response. Throws YantrikError on server-side
+ *  failure (queue_full, server_error, malformed) — never crashes with a
+ *  raw JSON.parse SyntaxError. Callers that want soft failure should
+ *  catch YantrikError explicitly. */
+export function parseYantrikResult(
+  res: unknown,
+  tool: string
+): Record<string, unknown> | unknown[] {
+  const r = res as { result?: unknown };
+  if (typeof r.result !== "string") {
+    if (typeof res === "object" && res !== null) return res as Record<string, unknown>;
+    throw new YantrikError("malformed", tool, "response missing string result", undefined);
+  }
+  const raw = r.result;
+  // Server-emitted error pattern — parse without throwing SyntaxError first.
+  if (raw.startsWith("Error executing tool") || raw.startsWith("Error: ")) {
+    throw new YantrikError(classifyServerError(raw), tool, raw, raw);
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown> | unknown[];
+  } catch {
+    throw new YantrikError(
+      "malformed",
+      tool,
+      `response was not valid JSON: ${raw.slice(0, 120)}${raw.length > 120 ? "…" : ""}`,
+      raw
+    );
+  }
+}
+
+/** Retry a YantrikDB write in the face of transient queue-full pushback.
+ *  The server's error message often includes "retry after Nms"; we honor it
+ *  when present, otherwise fall back to jittered exponential backoff.
+ *  Non-retryable errors (not_found, server_error, malformed) propagate on
+ *  the first attempt. */
+export async function retryOnBackpressure<T>(
+  fn: () => Promise<T>,
+  opts: { max_attempts?: number; base_delay_ms?: number } = {}
+): Promise<T> {
+  const maxAttempts = opts.max_attempts ?? 5;
+  const baseDelay = opts.base_delay_ms ?? 100;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!(e instanceof YantrikError) || e.kind !== "queue_full") throw e;
+      if (attempt === maxAttempts - 1) break;
+      // Prefer the server's own "retry after Nms" hint when present.
+      const hint = /retry after (\d+)\s*ms/i.exec(e.serverMessage);
+      const serverHint = hint ? Number(hint[1]) : 0;
+      const backoff = baseDelay * Math.pow(2, attempt);
+      const jitter = Math.floor(Math.random() * 100);
+      const delay = Math.max(serverHint * 2, backoff) + jitter;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 export class YantrikClient {
   constructor(private transport: YantrikDBTransport) {}
 
@@ -82,12 +180,13 @@ export class YantrikClient {
       valence: input.valence ?? 0,
     };
     if (input.emotional_state) args.emotional_state = input.emotional_state;
-    const res = (await this.transport.call("remember", args)) as {
-      result?: string;
-    };
-    const parsed = typeof res.result === "string"
-      ? JSON.parse(res.result)
-      : res;
+    // Retry on ingest-queue backpressure — the queue drains steadily even
+    // when full, so a short backoff usually succeeds. Non-retryable errors
+    // (server_error, not_found, malformed) propagate on the first attempt.
+    const parsed = (await retryOnBackpressure(async () => {
+      const res = await this.transport.call("remember", args);
+      return parseYantrikResult(res, "remember");
+    })) as { rid?: string; rids?: string[] };
     const rid = parsed.rid ?? parsed.rids?.[0];
     if (!rid) throw new Error("remember returned no rid");
     return { rid };
@@ -105,12 +204,10 @@ export class YantrikClient {
       valence: i.valence ?? 0,
       ...(i.emotional_state ? { emotional_state: i.emotional_state } : {}),
     }));
-    const res = (await this.transport.call("remember", { memories })) as {
-      result?: string;
-    };
-    const parsed = typeof res.result === "string"
-      ? JSON.parse(res.result)
-      : res;
+    const parsed = (await retryOnBackpressure(async () => {
+      const res = await this.transport.call("remember", { memories });
+      return parseYantrikResult(res, "remember");
+    })) as { rids?: string[] };
     return parsed.rids ?? [];
   }
 
@@ -126,12 +223,14 @@ export class YantrikClient {
     if (query.namespace) args.namespace = query.namespace;
     if (query.include_consolidated)
       args.include_consolidated = query.include_consolidated;
-    const res = (await this.transport.call("recall", args)) as {
-      result?: string;
+    const res = await this.transport.call("recall", args);
+    // Reads propagate YantrikError so callers can surface a real message
+    // ("queue is warming up, try again") instead of a JSON.parse crash.
+    const parsed = parseYantrikResult(res, "recall") as {
+      results?: RecallResponse["results"];
+      confidence?: number;
+      hints?: string[];
     };
-    const parsed = typeof res.result === "string"
-      ? JSON.parse(res.result)
-      : res;
     // Client-side filter for visibility ACL + tier + canonical_status.
     // YantrikDB itself doesn't know these conventions; we filter here.
     const filtered = (parsed.results ?? []).filter(
