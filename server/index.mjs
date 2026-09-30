@@ -21,6 +21,7 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Storage, handleStorageRequest } from "./storage.mjs";
 import {
   initGrimoirePluginServer,
   handleGrimoireRequest,
@@ -32,6 +33,11 @@ const YANTRIKDB_URL = process.env.CHRONICLER_YANTRIKDB_URL ?? "http://localhost:
 const YANTRIKDB_TOKEN = process.env.CHRONICLER_YANTRIKDB_TOKEN ?? "";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+
+// Durable storage (chats, characters, shared images). See server/storage.mjs.
+const DATA_DIR = process.env.CHRONICLER_DATA_DIR ?? join(__dirname, "..", "data");
+const storage = new Storage(DATA_DIR);
+await storage.init();
 const DIST_DIR = process.env.CHRONICLER_DIST
   ? normalize(process.env.CHRONICLER_DIST)
   : normalize(join(__dirname, "..", "dist"));
@@ -53,11 +59,28 @@ const MIME = {
   ".woff": "font/woff",
 };
 
+// Largest request body the proxy will buffer. A downscaled 1024px image is a
+// few hundred KB as base64; anything near this cap is a mistake, and without a
+// cap one oversized upload could pin the process.
+const MAX_BODY_BYTES = Number(process.env.CHRONICLER_MAX_BODY_BYTES ?? 16 * 1024 * 1024);
+
 async function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+    let size = 0;
+    let tooBig = false;
+    req.on("data", (c) => {
+      size += c.length;
+      // Past the cap: keep draining the socket (so we can still answer) but
+      // stop buffering, so memory stays bounded.
+      if (size > MAX_BODY_BYTES) tooBig = true;
+      else chunks.push(c);
+    });
+    req.on("end", () =>
+      tooBig
+        ? reject(Object.assign(new Error(`request body over ${MAX_BODY_BYTES} bytes`), { code: "E2BIG" }))
+        : resolve(Buffer.concat(chunks))
+    );
     req.on("error", reject);
   });
 }
@@ -127,7 +150,7 @@ async function proxyLlm(req, res) {
     const raw = await readBody(req);
     payload = JSON.parse(raw.toString("utf8"));
   } catch (err) {
-    res.writeHead(400, { "content-type": "application/json" });
+    res.writeHead(err.code === "E2BIG" ? 413 : 400, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: `bad proxy payload: ${err.message}` }));
     return;
   }
@@ -232,6 +255,7 @@ async function serveStatic(req, res) {
 const server = createServer(async (req, res) => {
   try {
     if (req.url.startsWith("/api/mcp")) return await proxyMcp(req, res);
+    if (await handleStorageRequest(storage, req, res)) return;
     if (req.url === "/api/llm") return await proxyLlm(req, res);
     if (req.url.startsWith("/api/grimoire/")) {
       if (handleGrimoireRequest(req, res)) return;

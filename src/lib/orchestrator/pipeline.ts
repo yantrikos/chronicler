@@ -2,6 +2,7 @@
 // checks + conflict scan IN PARALLEL. Serial retrieval feels awful.
 // See Saga task #8.
 
+import { splitOoc } from "./ooc";
 import { YantrikClient, type RecallResult } from "../yantrikdb/client";
 import { ns } from "../yantrikdb/types";
 import type { TurnRequest } from "./types";
@@ -37,6 +38,33 @@ export interface RetrievalOpts {
   mcpEnabledResources?: string[];
   /** MCP server registry — required when mcpEnabledResources is set. */
   mcpRegistry?: import("../mcp/registry").McpServerRegistry;
+  /** Recent chat turns, oldest first. Used to give short replies ("ok",
+   *  "yes, go on") enough context to retrieve something relevant. */
+  recentTurns?: import("./types").ChatTurn[];
+}
+
+/** Below this many characters a message is anaphoric ("ok", "why?", "go on")
+ *  and carries no signal of its own. Anything longer is a real question and
+ *  is used as-is: prepending prior turns to it dilutes what was asked. */
+const SHORT_QUERY_CHARS = 18;
+const CONTEXT_CHARS = 240;
+
+/** Build the recall query for a turn. A substantive user message is used
+ *  as-is. A very short one retrieves noise on its own, so it is anchored to
+ *  the most recent assistant turn — what the message is replying to. */
+export function buildRecallQuery(
+  userMessage: string,
+  recentTurns: import("./types").ChatTurn[] = []
+): string {
+  const msg = userMessage.trim();
+  if (msg.length >= SHORT_QUERY_CHARS) return msg;
+  for (let i = recentTurns.length - 1; i >= 0; i--) {
+    const t = recentTurns[i];
+    if (t.role !== "assistant" || t.content.trim() === msg) continue;
+    const ctx = t.content.trim().slice(0, CONTEXT_CHARS);
+    return msg ? `${ctx}\n${msg}` : ctx;
+  }
+  return msg;
 }
 
 /** Retrieve everything the orchestrator needs for a given turn. Recall is
@@ -48,7 +76,10 @@ export async function retrieveForTurn(
   opts: RetrievalOpts = {}
 ): Promise<RetrievalResult> {
   const t0 = performance.now();
-  const query = req.user_message?.content ?? "";
+  // Directives steer the story; they are not what the reply is about, so
+  // they never drive recall.
+  const spokenMessage = splitOoc(req.user_message?.content ?? "").spoken;
+  const query = buildRecallQuery(spokenMessage, opts.recentTurns);
   // When a CHARACTER is the speaker (it's their turn), retrieval must be
   // scoped to what that character can see. When the USER is the speaker,
   // we use the character-being-replied-to as the visibility subject (the
@@ -125,9 +156,10 @@ export async function retrieveForTurn(
       client.temporalStale(charNs).catch(() => ({ result: "[]" })),
       // Conflicts pending for the character
       client.conflictPending(charNs).catch(() => ({ result: "[]" })),
-      // Surfaced skills — query is the current user message, scoped to the
+      // Surfaced skills — query is the raw user message (never the anchored
+      // recall query: a skill fires on what was just said), scoped to the
       // active character. Returns top 10; compose filters by derived state.
-      client.skillSurface(query || "current scene", {
+      client.skillSurface(spokenMessage || "current scene", {
         applies_to: [req.character.id],
         top_k: 10,
       }),

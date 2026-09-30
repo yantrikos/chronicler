@@ -22,7 +22,11 @@ import { EmptyState } from "./components/Brand/EmptyState";
 import { HelpOverlay } from "./components/Brand/HelpOverlay";
 import { useKeyboardShortcuts } from "./lib/ui/keyboard";
 import { Orchestrator } from "./lib/orchestrator";
-import type { Character, ChatTurn, PromptCapture } from "./lib/orchestrator/types";
+import type { Character, ChatTurn, PromptCapture, TurnAttachment } from "./lib/orchestrator/types";
+import { VisionDescriber } from "./lib/vision/describe";
+import { prepareImage } from "./lib/vision/prepare";
+import { putImage } from "./lib/vision/attachments";
+import type { DescribeUi } from "./components/Chat/ChatPane";
 import { parseCard } from "./lib/cards/parser";
 import { decomposeCard, buildSystemPrompt } from "./lib/cards/decompose";
 import { YantrikClient } from "./lib/yantrikdb/client";
@@ -89,6 +93,8 @@ import { listCoreTraitsForCharacter } from "./lib/skills/core-trait-promotions";
 import { CoreTraitVerifier } from "./lib/skills/core-trait-verifier";
 import { CoreTraitPromoter } from "./lib/skills/core-trait-promoter";
 import { SelfModelGenerator } from "./lib/identity/self-model-generator";
+import { applyEnactments, ensureEnactments, traitKey } from "./lib/identity/trait-enactment";
+import { loadEnactments, saveEnactments } from "./lib/identity/enactment-store";
 import {
   loadSelfModel,
   writeSelfModel,
@@ -172,9 +178,34 @@ import {
 } from "./lib/sampling/presets";
 import { startSession } from "./lib/session/lifecycle";
 import { generateRecap } from "./lib/recap/generator";
+import { hasStoryHistory } from "./lib/recap/history";
+import { ThemeMenu, MoreMenu, SyncBadge } from "./components/Chat/HeaderMenus";
+import { SceneHud } from "./components/Chat/SceneHud";
+import { SceneTracker } from "./lib/scene/tracker";
+import { emptySceneState, renderSceneStatus, type SceneState } from "./lib/scene/state";
+import { loadScene, saveScene, clearScene } from "./lib/scene/store";
+import { getSyncEngine } from "./lib/storage/sync";
+import { ChapterWriter, stepChronicle } from "./lib/story/chronicler";
+import { WINDOW, deleteChapter, editChapter, editEarlier, emptyChronicle as emptyStory, historyStart, renderChronicle, resolveCovered, type Chronicle } from "./lib/story/chronicle";
+import { loadChronicle, saveChronicle, clearChronicle } from "./lib/story/store";
+import { StoryHud } from "./components/Chat/StoryHud";
+import { AuditModal } from "./components/Chat/AuditModal";
+import { ConsistencyJudge } from "./lib/audit/judge";
+import { extractDeclaredTraits } from "./lib/audit/traits";
+import { runAudit, type AuditReport } from "./lib/audit/run";
+import { loadReport, saveReport, loadTraits, saveTraits } from "./lib/audit/store";
+import { LedgerTracker } from "./lib/scene/ledger-tracker";
+import { dismiss as dismissDeed, dueDeeds, emptyLedger, markNudged, openDeeds, renderConsequences, type Ledger } from "./lib/scene/ledger";
+import { loadLedger, saveLedger } from "./lib/scene/ledger-store";
+import { ImageService } from "./lib/images/service";
+import { createImageCache } from "./lib/images/cache";
+import { ambientFor } from "./lib/images/ambient";
+import { proxyPostJson } from "./lib/providers";
+import { BEATS, advancePacing, markBeatUsed, pickBeat, turnsUntilBeat, type PacingLevel } from "./lib/scene/pacing";
 import {
   activePersona,
   activeProvider,
+  providerForRole,
   defaultConfig,
   extractionProvider,
   loadConfig,
@@ -216,6 +247,20 @@ function buildTransport(cfg: ChroniclerConfig): YantrikDBTransport {
     });
   }
   return new InMemoryTransport();
+}
+
+/** True for a model server on this machine or the local network — somewhere a
+ *  private photo is not leaving the player's own hands. */
+function isLocalProvider(p: ProviderConfigEntry): boolean {
+  if (p.kind !== "ollama" && p.kind !== "openai-compat") return false;
+  const host = (() => {
+    try {
+      return new URL(p.base_url ?? "http://localhost").hostname;
+    } catch {
+      return "";
+    }
+  })();
+  return /^(localhost|127\.|\[?::1\]?|host\.docker\.internal|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(host) || host.endsWith(".local");
 }
 
 function buildProvider(p: ProviderConfigEntry): LlmProvider {
@@ -315,6 +360,10 @@ function App() {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [memories, setMemories] = useState<InspectorMemory[]>([]);
   const [thinking, setThinking] = useState(false);
+  // Aborts the in-flight generation (Stop button / Esc).
+  const abortRef = useRef<AbortController | null>(null);
+  // Mobile: the inspector column is a slide-over drawer below the lg breakpoint.
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [recap, setRecap] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Active scene preset for the current session. Falls back to the app
@@ -374,6 +423,124 @@ function App() {
    *  feeds per-turn synchronous lookup so the orchestrator opts can
    *  include selfModel without an await. */
   const selfModelGeneratorRef = useRef<SelfModelGenerator | null>(null);
+  // Scene status board — location, time, who is present… — kept per session.
+  const sceneTrackerRef = useRef<SceneTracker | null>(null);
+  const [sceneBoard, setSceneBoard] = useState<SceneState>(emptySceneState);
+  const [sceneUpdating, setSceneUpdating] = useState(false);
+  const sceneBoardRef = useRef<SceneState>(sceneBoard);
+  sceneBoardRef.current = sceneBoard;
+  const liveSessionRef = useRef<string | null>(null);
+  // Consequence ledger — things the player did that the world may answer.
+  const ledgerTrackerRef = useRef<LedgerTracker | null>(null);
+  const [ledger, setLedger] = useState<Ledger>(emptyLedger);
+  const ledgerRef = useRef<Ledger>(ledger);
+  ledgerRef.current = ledger;
+  // The chronicle — "the story so far" for chats longer than the recent window.
+  const chronicleWriterRef = useRef<ChapterWriter | null>(null);
+  const [chronicle, setChronicle] = useState<Chronicle>(emptyStory);
+  const chronicleRef = useRef<Chronicle>(chronicle);
+  chronicleRef.current = chronicle;
+  const [chronicleBusy, setChronicleBusy] = useState(false);
+  const chronicleRunning = useRef(false);
+  const turnsRef = useRef<ChatTurn[]>([]);
+  // Character consistency audit.
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditTraits, setAuditTraits] = useState<string[]>([]);
+  const [auditReport, setAuditReport] = useState<AuditReport | null>(null);
+  const [auditRunning, setAuditRunning] = useState<{ done: number; total: number } | null>(null);
+  const [auditExtracting, setAuditExtracting] = useState(false);
+  const auditCancel = useRef(false);
+  const charactersRef = useRef<Character[]>([]);
+  turnsRef.current = turns;
+  charactersRef.current = characters;
+
+  // Optional graphics (all off unless enabled in Settings).
+  const imageServiceRef = useRef<ImageService | null>(null);
+  if (!imageServiceRef.current) imageServiceRef.current = new ImageService(createImageCache(), proxyPostJson);
+  const [generatedPortraits, setGeneratedPortraits] = useState<Record<string, string>>({});
+  const generatedPortraitsRef = useRef(generatedPortraits);
+  generatedPortraitsRef.current = generatedPortraits;
+  const [backdropUrl, setBackdropUrl] = useState<string | null>(null);
+  const [imageStatus, setImageStatus] = useState<{ busy: string | null; error?: string }>({ busy: null });
+  useEffect(() => {
+    liveSessionRef.current = sessionId;
+    getSyncEngine()?.pin(sessionId ? `chronicler.session.${sessionId}.turns` : null);
+    setSceneBoard(sessionId ? loadScene(sessionId) : emptySceneState());
+    setLedger(sessionId ? loadLedger(sessionId) : emptyLedger());
+    const stored = sessionId ? loadChronicle(sessionId) : emptyStory();
+    chronicleRef.current = stored;
+    setChronicle(stored);
+    // An existing long chat with no chronicle yet catches up in the background.
+    if (sessionId) {
+      const t = window.setTimeout(() => void extendChronicle(), 1500);
+      return () => window.clearTimeout(t);
+    }
+  }, [sessionId]);
+
+  // Portraits: one per character without an avatar, generated once and cached.
+  useEffect(() => {
+    const cfg = config.images;
+    if (!cfg?.generate || !cfg.backend?.base_url) return;
+    let cancelled = false;
+    void (async () => {
+      for (const c of characters) {
+        if (c.avatar_url || generatedPortraitsRef.current[c.id]) continue;
+        setImageStatus({ busy: `portrait of ${c.name}` });
+        try {
+          const r = await imageServiceRef.current!.portrait({ name: c.name, description: c.description }, cfg);
+          if (cancelled) return;
+          setGeneratedPortraits((p) => ({ ...p, [c.id]: r.url }));
+          setImageStatus({ busy: null });
+        } catch (e) {
+          if (!cancelled) setImageStatus({ busy: null, error: e instanceof Error ? e.message : String(e) });
+          return; // don't hammer a failing backend
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [characters, config.images]);
+
+  // Backdrop: redrawn when the scene moves (location or time of day), debounced.
+  useEffect(() => {
+    const cfg = config.images;
+    if (!cfg?.generate || !cfg.backend?.base_url || !sceneBoard.location) {
+      setBackdropUrl(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setImageStatus({ busy: "scene backdrop" });
+      imageServiceRef
+        .current!.backdrop(sceneBoardRef.current, cfg)
+        .then((r) => {
+          if (cancelled) return;
+          if (r) setBackdropUrl(r.url);
+          setImageStatus({ busy: null });
+        })
+        .catch((e) => {
+          if (!cancelled) setImageStatus({ busy: null, error: e instanceof Error ? e.message : String(e) });
+        });
+    }, 1200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sceneBoard.location, sceneBoard.time, config.images]);
+
+  function redrawBackdrop(): void {
+    const cfg = config.images;
+    if (!cfg?.generate || !cfg.backend?.base_url) return;
+    setImageStatus({ busy: "scene backdrop" });
+    imageServiceRef
+      .current!.backdrop(sceneBoardRef.current, cfg, undefined, true)
+      .then((r) => {
+        if (r) setBackdropUrl(r.url);
+        setImageStatus({ busy: null });
+      })
+      .catch((e) => setImageStatus({ busy: null, error: e instanceof Error ? e.message : String(e) }));
+  }
   const selfModelByCharacterRef = useRef<Map<string, SelfModel>>(new Map());
   /** Phase 11 Pillar 3: identity inspector view-model. Recomputed when
    *  skills/promotions/self-model change. */
@@ -672,6 +839,9 @@ function App() {
         coreTraitVerifierRef.current
       );
       selfModelGeneratorRef.current = new SelfModelGenerator(vp, xp.model);
+      sceneTrackerRef.current = new SceneTracker(vp, xp.model);
+      ledgerTrackerRef.current = new LedgerTracker(vp, xp.model);
+      chronicleWriterRef.current = new ChapterWriter(vp, xp.model);
     } else if (p && p.kind !== "mock") {
       conflictVerifierRef.current = new ConflictVerifier(provider, p.model);
       skillFormerRef.current = new SkillFormer(
@@ -695,6 +865,9 @@ function App() {
         coreTraitVerifierRef.current
       );
       selfModelGeneratorRef.current = new SelfModelGenerator(provider, p.model);
+      sceneTrackerRef.current = new SceneTracker(provider, p.model);
+      ledgerTrackerRef.current = new LedgerTracker(provider, p.model);
+      chronicleWriterRef.current = new ChapterWriter(provider, p.model);
     } else {
       conflictVerifierRef.current = null;
       skillFormerRef.current = null;
@@ -703,6 +876,9 @@ function App() {
       coreTraitVerifierRef.current = null;
       coreTraitPromoterRef.current = null;
       selfModelGeneratorRef.current = null;
+      sceneTrackerRef.current = null;
+      ledgerTrackerRef.current = null;
+      chronicleWriterRef.current = null;
     }
     // The outcome tracker is provider-independent — it just talks to
     // YantrikDB. Always build it; even in MockProvider mode it correctly
@@ -740,7 +916,13 @@ function App() {
         provider: providerRef.current,
         model: modelRef.current,
         extractor: extractorRef.current,
-        getRecentTurns: async () => turns.slice(-10),
+        // Recent messages the model reads verbatim. With a chronicle, start at the
+        // first message no chapter covers (never fewer than the window, never more
+        // than window + chunk - 1) so nothing is ever in neither place.
+        getRecentTurns: async () => {
+          const covered = config.story_summary === false ? 0 : resolveCovered(turns, chronicleRef.current);
+          return covered > 0 ? turns.slice(historyStart(turns.length, covered)) : turns.slice(-WINDOW);
+        },
         userPersona: personaRef.current,
         sampling: samplingRef.current,
         maxResponseTokens: activeProvider(config)?.max_response_tokens,
@@ -1736,7 +1918,11 @@ function App() {
    *  authoritative source; the promotions map only carries the verifier
    *  verdict + rank + crystallization metadata. */
   function deriveCoreTraitsForCharacter(
-    characterId: string
+    characterId: string,
+    /** `enact`: for the PROMPT only — add each trait's "On the page:" line when
+     *  one has been made. The consistency audit calls this without it and must
+     *  keep seeing the plain traits. */
+    opts?: { enact?: boolean }
   ): string[] | undefined {
     const TOP_K = 7;
     const promotions = listCoreTraitsForCharacter(characterId);
@@ -1750,7 +1936,8 @@ function App() {
       if (body && body.length > 0) traits.push(body);
       if (traits.length >= TOP_K) break;
     }
-    return traits.length > 0 ? traits : undefined;
+    if (traits.length === 0) return undefined;
+    return opts?.enact ? applyEnactments(traits, loadEnactments()) : traits;
   }
 
   function derivePromptedPreferences(
@@ -2185,13 +2372,7 @@ function App() {
             ]);
           }
         });
-        generateRecap(clientRef.current, {
-          character_id: char.id,
-          world_id: char.world_id,
-          speaker: "user",
-          provider: providerRef.current,
-          model: modelRef.current,
-        }).then((r) => setRecap(r.text));
+        void refreshRecapFor(char);
       } else {
         setScene((s) => (s ? addParticipant(s, char.id) : s));
       }
@@ -2233,15 +2414,7 @@ function App() {
     // Pull "Previously on…" from prior canon so re-opening a character
     // with persisted memory doesn't feel like a fresh stranger. Matches
     // switchSession() + startNewSession() behavior (parity bug fix).
-    generateRecap(clientRef.current, {
-      character_id: primary.id,
-      world_id: primary.world_id,
-      speaker: "user",
-      provider: providerRef.current,
-      model: modelRef.current,
-    })
-      .then((r) => setRecap(r.text))
-      .catch(() => undefined);
+    void refreshRecapFor(primary);
   }
 
   async function startNewSession(): Promise<void> {
@@ -2273,19 +2446,18 @@ function App() {
           ]
         : []
     );
-    const r = await generateRecap(clientRef.current, {
-      character_id: primary.id,
-      world_id: primary.world_id,
-      speaker: "user",
-      provider: providerRef.current,
-      model: modelRef.current,
-    });
-    setRecap(r.text);
+    await refreshRecapFor(primary);
   }
 
   async function switchSession(id: string): Promise<void> {
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
+    // A cold chat may have been dropped from the browser cache to make room;
+    // the server has it. Fetch it back BEFORE touching any state. This must
+    // stay above every setState: an await between setSessionId() and
+    // setTurns() lets the effect that persists turns run with the new session
+    // id and the OLD turns, overwriting the chat with the wrong data.
+    await getSyncEngine()?.ensureLocal(`chronicler.session.${meta.id}.turns`);
     const stored = listCharacters();
     const chars = meta.character_ids
       .map((cid) => stored.find((c) => c.id === cid))
@@ -2333,13 +2505,7 @@ function App() {
     // different model than it was created on still gets correct sampling.
     void onPickPreset(restored, { silent: true, persist: false });
     const primary = chars[0];
-    generateRecap(clientRef.current, {
-      character_id: primary.id,
-      world_id: primary.world_id,
-      speaker: "user",
-      provider: providerRef.current,
-      model: modelRef.current,
-    }).then((r) => setRecap(r.text));
+    void refreshRecapFor(primary);
   }
 
   function onRenameSession(id: string, title: string) {
@@ -2452,6 +2618,28 @@ function App() {
     }
   }
 
+  /** Refresh the "Previously on…" banner. Only characters that have actually
+   *  been played get one — a fresh card's canon is just its description, and
+   *  recapping that as prior story is false. */
+  async function refreshRecapFor(char: Character): Promise<void> {
+    if (!hasStoryHistory(listSessions(), char.id)) {
+      setRecap("");
+      return;
+    }
+    try {
+      const r = await generateRecap(clientRef.current, {
+        character_id: char.id,
+        world_id: char.world_id,
+        speaker: "user",
+        provider: providerRef.current,
+        model: modelRef.current,
+      });
+      setRecap(r.text);
+    } catch {
+      // A missing recap is cosmetic; never surface it as an error.
+    }
+  }
+
   async function runAssistantTurn(
     baseTurns: ChatTurn[],
     userTurn: ChatTurn | undefined,
@@ -2467,6 +2655,48 @@ function App() {
     if (!sessionId || !scene) return;
     setThinking(true);
     setStreamingText("");
+    const abort = new AbortController();
+    abortRef.current = abort;
+    // Pacing: if the scene board has been still long enough, hand the model one
+    // private story beat. Never on regenerate/continue (skipWrites), and only
+    // when there is a board to measure stillness with.
+    let storyBeat: string | undefined;
+    if (
+      !opts.skipWrites &&
+      sceneTrackerRef.current &&
+      config.scene_tracking !== false
+    ) {
+      const board = sceneBoardRef.current;
+      const ledgerOn = ledgerTrackerRef.current && config.consequences !== false;
+      const beat = pickBeat(
+        board,
+        pacingLevel(config),
+        Math.random,
+        ledgerOn ? { deeds: openDeeds(ledgerRef.current) } : undefined
+      );
+      if (beat) {
+        storyBeat = beat.text(board);
+        const marked = markBeatUsed(board, beat);
+        sceneBoardRef.current = marked; // the tracker reads the ref later this turn
+        setSceneBoard(marked);
+        if (sessionId) saveScene(sessionId, marked);
+      }
+    }
+    // Consequences: deeds that have aged enough are put to the model this turn
+    // (never on regenerate/continue), then not again for a while.
+    let consequences: string[] | undefined;
+    // Deeds age in exchanges (one reply each), not in chat messages.
+    const turnNo = exchangeNo(baseTurns);
+    if (!opts.skipWrites && ledgerTrackerRef.current && config.consequences !== false) {
+      const due = dueDeeds(ledgerRef.current, turnNo);
+      if (due.length > 0) {
+        consequences = renderConsequences(due, turnNo);
+        const marked = markNudged(ledgerRef.current, due.map((d) => d.id), turnNo);
+        ledgerRef.current = marked;
+        setLedger(marked);
+        if (sessionId) saveLedger(sessionId, marked);
+      }
+    }
     try {
       const { assistant_turn, writes_promise, prompted_skill_ids, retrieval, tool_invocations } = await orchestrator.turn(
         {
@@ -2485,13 +2715,18 @@ function App() {
           intensitySnippet: effectiveIntensitySnippet(activeIntensityId),
           preferences: derivePromptedPreferences(speakerChar.id),
           identityNotes: loadIdentityNotes(speakerChar.id) || undefined,
-          coreTraits: deriveCoreTraitsForCharacter(speakerChar.id),
+          coreTraits: deriveCoreTraitsForCharacter(speakerChar.id, { enact: config.enact_traits === true }),
           selfModel: deriveSelfModelForCharacter(speakerChar.id),
           allowedTools: resolveAllowedTools(loadCharacterGating(speakerChar.id)),
           mcpEnabledResources: resolveEnabledResources(
             loadCharacterResourceOptIn(speakerChar.id)
           ),
           onChunk: (_chunk, accumulated) => setStreamingText(accumulated),
+          signal: abort.signal,
+          sceneStatus: renderSceneStatus(sceneBoardRef.current),
+          storyBeat,
+          consequences,
+          storySoFar: config.story_summary === false ? undefined : renderChronicle(chronicleRef.current) || undefined,
         }
       );
       setLastPromptCapture(orchestrator.getLastPromptCapture());
@@ -2564,6 +2799,9 @@ function App() {
         setTurns([...baseTurns, assistant_turn]);
       }
       refreshMemories();
+      updateSceneBoard(sessionId, speakerChar, userTurn, assistant_turn, opts.skipWrites);
+      updateLedger(sessionId, speakerChar, userTurn, assistant_turn, turnNo, opts.skipWrites);
+      window.setTimeout(() => void extendChronicle(), 400); // after the new turn is in state
       if (scene.kind === "group") {
         const idx = characters.findIndex((c) => c.id === speakerChar.id);
         const next = characters[(idx + 1) % characters.length];
@@ -2580,13 +2818,296 @@ function App() {
         }
       }).catch(() => undefined);
     } catch (err) {
+      // Stop before any text arrived: nothing to keep, and not an error.
+      if (abort.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[chronicler] turn failed:", err);
       setErrorMsg(`Turn failed: ${msg}`);
     } finally {
+      if (abortRef.current === abort) abortRef.current = null;
       setThinking(false);
       setStreamingText(undefined);
     }
+  }
+
+  /** Ask the tracker what changed in this exchange and fold it into the board.
+   *  Fire-and-forget: it never blocks the reply. If the player edited the board
+   *  while it ran, the model's result is dropped rather than overwriting them. */
+  function updateSceneBoard(
+    sid: string,
+    char: Character,
+    userTurn: ChatTurn | undefined,
+    reply: ChatTurn,
+    skip?: boolean
+  ): void {
+    const tracker = sceneTrackerRef.current;
+    if (skip || !tracker || config.scene_tracking === false) return;
+    const base = sceneBoardRef.current;
+    setSceneUpdating(true);
+    void tracker
+      .update({
+        state: base,
+        userName: activePersona(config).name,
+        characterName: char.name,
+        userText: userTurn?.content,
+        replyText: reply.content,
+      })
+      .then((next) => {
+        if (liveSessionRef.current !== sid) return;
+        if (sceneBoardRef.current !== base) return; // edited meanwhile
+        // A turn where the board did not change is a still turn.
+        const advanced = advancePacing(next, next !== base);
+        if (advanced === base) return;
+        setSceneBoard(advanced);
+        saveScene(sid, advanced);
+      })
+      .finally(() => setSceneUpdating(false));
+  }
+
+  /** The model that reads replies for the consistency audit: the background
+   *  provider (small, cheap, already configured for the trackers). */
+  function auditJudge(): { judge: ConsistencyJudge; provider: LlmProvider; model: string; label: string } | null {
+    const bp = providerForRole(config, "background");
+    if (!bp || bp.kind === "mock") return null;
+    const provider = buildProvider({ ...bp, disable_thinking: true });
+    return { judge: new ConsistencyJudge(provider, bp.model), provider, model: bp.model, label: bp.model };
+  }
+
+  // Optional setting: make the "On the page:" line for any core trait that lacks
+  // one. Background, never blocks a turn; a trait that cannot be restated simply
+  // shows as itself. Off unless the player turned it on.
+  const enactRunning = useRef(false);
+  const enactCancelled = useRef(false);
+  useEffect(() => {
+    enactCancelled.current = false;
+    return () => {
+      enactCancelled.current = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (config.enact_traits !== true || enactRunning.current) return;
+    const bp = providerForRole(config, "background");
+    if (!bp || bp.kind === "mock") return;
+    const jobs = characters
+      .map((c) => ({ name: c.name, traits: deriveCoreTraitsForCharacter(c.id) ?? [] }))
+      .filter((j) => j.traits.length > 0);
+    if (jobs.length === 0) return;
+    let cache = loadEnactments();
+    if (jobs.every((j) => j.traits.every((t) => traitKey(t) in cache))) return;
+    enactRunning.current = true;
+    const provider = buildProvider({ ...bp, disable_thinking: true });
+    void (async () => {
+      try {
+        for (const j of jobs) {
+          const r = await ensureEnactments(provider, bp.model, j.name, j.traits, cache, { get cancelled() { return enactCancelled.current; } });
+          cache = r.cache;
+          if (r.added > 0) saveEnactments(cache);
+        }
+      } finally {
+        enactRunning.current = false;
+      }
+    })();
+    // A run always finishes; it is only stopped when the app unmounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.enact_traits, inspectedSkills, characters]);
+
+  /** Declared traits from the card, merged with any core traits the character
+   *  has developed. The player edits the result before auditing. */
+  async function extractAuditTraits(): Promise<void> {
+    const char = charactersRef.current[0];
+    const j = auditJudge();
+    if (!char || !j) return;
+    setAuditExtracting(true);
+    try {
+      const declared = await extractDeclaredTraits(j.provider, j.model, char.name, char.system_prompt ?? char.description ?? "");
+      const core = deriveCoreTraitsForCharacter(char.id) ?? [];
+      const seen = new Set<string>();
+      const merged = [...declared, ...core].filter((t) => !seen.has(t.toLowerCase()) && !!seen.add(t.toLowerCase()));
+      setAuditTraits(merged);
+      saveTraits(char.id, merged);
+    } finally {
+      setAuditExtracting(false);
+    }
+  }
+
+  function openAudit(): void {
+    const char = charactersRef.current[0];
+    if (!char) return;
+    setAuditReport(sessionId ? loadReport(sessionId) : null);
+    const stored = loadTraits(char.id);
+    setAuditTraits(stored ?? []);
+    setAuditOpen(true);
+    if (!stored || stored.length === 0) void extractAuditTraits();
+  }
+
+  async function startAudit(): Promise<void> {
+    const char = charactersRef.current[0];
+    const j = auditJudge();
+    if (!char || !j || !sessionId || auditRunning) return;
+    const traits = auditTraits.map((t) => t.trim()).filter(Boolean);
+    saveTraits(char.id, traits);
+    auditCancel.current = false;
+    setAuditRunning({ done: 0, total: 0 });
+    try {
+      const report = await runAudit({
+        turns: turnsRef.current,
+        sessionId,
+        traits,
+        judgeModel: j.model,
+        judge: (t, reply) => j.judge.judge(t, reply, char.name),
+        onProgress: (done, total) => setAuditRunning({ done, total }),
+        shouldCancel: () => auditCancel.current,
+      });
+      setAuditReport(report);
+      saveReport(sessionId, report);
+    } finally {
+      setAuditRunning(null);
+    }
+  }
+
+  function jumpToTurn(turnId: string): void {
+    setAuditOpen(false);
+    setHighlightTurnId(turnId);
+    window.setTimeout(() => document.getElementById(`turn-${turnId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+  }
+
+  /** Bring the chronicle up to date: write a chapter for every chunk of messages
+   *  that has left the recent window. Single-flight, runs in the background, and
+   *  stops if you switch chats. If you edit the chronicle while it works, it
+   *  re-reads and carries on rather than overwriting you. */
+  async function extendChronicle(): Promise<void> {
+    const writer = chronicleWriterRef.current;
+    const sid = liveSessionRef.current;
+    if (!writer || !sid || config.story_summary === false || chronicleRunning.current) return;
+    chronicleRunning.current = true;
+    setChronicleBusy(true);
+    try {
+      for (let i = 0; i < 60; i++) {
+        if (liveSessionRef.current !== sid) return;
+        const base = chronicleRef.current;
+        const next = await stepChronicle(base, turnsRef.current, writer, {
+          userName: activePersona(config).name,
+          characterName: charactersRef.current[0]?.name ?? "Character",
+        });
+        if (!next) return; // nothing left to summarise, or the model is unreachable
+        if (liveSessionRef.current !== sid) return;
+        if (chronicleRef.current !== base) continue; // edited meanwhile: redo from the new state
+        chronicleRef.current = next;
+        setChronicle(next);
+        saveChronicle(sid, next);
+      }
+    } finally {
+      chronicleRunning.current = false;
+      setChronicleBusy(false);
+    }
+  }
+
+  function updateChronicle(next: Chronicle): void {
+    chronicleRef.current = next;
+    setChronicle(next);
+    if (sessionId) saveChronicle(sessionId, next);
+  }
+
+  /** After a reply: if something consequential seems to have happened (a cheap
+   *  check), ask the tracker to record it, and to note deeds the reply answered.
+   *  Fire-and-forget; dropped if the player changed the ledger meanwhile. */
+  function updateLedger(
+    sid: string,
+    char: Character,
+    userTurn: ChatTurn | undefined,
+    reply: ChatTurn,
+    turn: number,
+    skip?: boolean
+  ): void {
+    const tracker = ledgerTrackerRef.current;
+    if (skip || !tracker || config.consequences === false) return;
+    const base = ledgerRef.current;
+    void tracker
+      .update({
+        ledger: base,
+        turn,
+        userName: activePersona(config).name,
+        characterName: char.name,
+        present: sceneBoardRef.current.present,
+        userText: userTurn?.content,
+        replyText: reply.content,
+      })
+      .then((next) => {
+        if (next === base || liveSessionRef.current !== sid) return;
+        if (ledgerRef.current !== base) return; // changed meanwhile
+        setLedger(next);
+        saveLedger(sid, next);
+      });
+  }
+
+  /** Describe an image the player attached, for the composer to show and let
+   *  them edit before it enters the story. The bytes are kept locally; only the
+   *  description ever reaches the story model, and it is never written to
+   *  memory. If the vision model can't or won't describe it, the player gets an
+   *  empty description to write themselves. */
+  async function describeAttachedImage(file: Blob): Promise<DescribeUi> {
+    const vp = providerForRole(config, "vision");
+    if (!vp) return { ok: false, error: "No vision model is set. Choose one in Settings → Vision." };
+    if (!isLocalProvider(vp)) {
+      const key = `chronicler:vision-ok:${vp.id}`;
+      let ok = false;
+      try {
+        ok = window.localStorage.getItem(key) === "1";
+      } catch {
+        /* ignore */
+      }
+      if (!ok) {
+        ok = window.confirm(
+          `This image will be sent to "${vp.label}" (${vp.model}), which is not on this device.\n\nOnly send images you are comfortable sharing with that service. Continue?`
+        );
+        if (!ok) return { ok: false, error: "Cancelled — the image was not sent." };
+        try {
+          window.localStorage.setItem(key, "1");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    let prepared;
+    try {
+      prepared = await prepareImage(file);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    await putImage({ id: prepared.id, mime: prepared.mime, b64: prepared.b64 });
+    const describer = new VisionDescriber(buildProvider({ ...vp, disable_thinking: true }), vp.model);
+    const ctx = renderSceneStatus(sceneBoardRef.current);
+    const r = await describer.describe({ image: prepared.b64, sceneContext: ctx.length ? ctx : undefined });
+    const base = { id: prepared.id, kind: "image" as const, mime: prepared.mime, width: prepared.width, height: prepared.height };
+    if (r.ok) {
+      return { ok: true, thumb: prepared.dataUrl, attachment: { ...base, description: r.text, described_by: vp.model } };
+    }
+    const warning =
+      r.reason === "refused"
+        ? "The vision model would not describe this image. Write a short description yourself."
+        : r.reason === "empty"
+        ? "The vision model returned nothing. Write a short description yourself."
+        : `Could not reach the vision model${r.detail ? ` (${r.detail.slice(0, 80)})` : ""}. Write a short description yourself.`;
+    return { ok: true, thumb: prepared.dataUrl, attachment: { ...base, description: "" }, warning };
+  }
+
+  /** The number of the exchange being played: replies so far, plus one. */
+  function exchangeNo(ts: ChatTurn[]): number {
+    return ts.filter((t) => t.role === "assistant").length + 1;
+  }
+
+  function pacingLevel(cfg: ChroniclerConfig): PacingLevel {
+    return cfg.pacing ?? "gentle";
+  }
+
+  function onPacingChange(level: PacingLevel): void {
+    const next = { ...config, pacing: level };
+    saveConfig(next);
+    setConfig(next);
+  }
+
+  function stopGeneration(): void {
+    abortRef.current?.abort();
   }
 
   // Proactive-speak loop: checks every 15s whether the character should
@@ -2633,7 +3154,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.proactive_mode, config.proactive_idle_seconds, characters, thinking]);
 
-  async function onSend(text: string) {
+  async function onSend(text: string, attachments?: TurnAttachment[]) {
     setErrorMsg(null);
     lastUserTurnAtRef.current = Date.now();
     if (characters.length === 0) {
@@ -2693,6 +3214,7 @@ function App() {
       content: text,
       created_at: new Date().toISOString(),
       session_id: sessionId,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     };
     const nextTurns = [...turns, userTurn];
     setTurns(nextTurns);
@@ -2921,9 +3443,10 @@ function App() {
     refreshMemories();
   }
 
-  function onExportSession(id: string) {
+  async function onExportSession(id: string) {
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
+    await getSyncEngine()?.ensureLocal(`chronicler.session.${id}.turns`);
     const exportTurns = id === sessionId ? turns : loadTurns(id);
     const storedChars = listCharacters();
     const chars = meta.character_ids
@@ -2941,8 +3464,10 @@ function App() {
     downloadText(`chronicler-${safeTitle}-${date}.md`, md);
   }
 
-  function onExportBackup() {
+  async function onExportBackup() {
     const allSessions = listSessions();
+    // A complete backup needs every chat, including any dropped from the cache.
+    await Promise.all(allSessions.map((m) => getSyncEngine()?.ensureLocal(`chronicler.session.${m.id}.turns`)));
     const bundled = allSessions.map((m) => ({
       meta: m,
       turns: loadTurns(m.id),
@@ -3195,9 +3720,25 @@ function App() {
   }
 
   return (
-    <div className="grid h-screen grid-cols-[1fr_340px] text-sm">
-      <div className="flex flex-col">
-        <header className="px-6 py-3 border-b border-neutral-800 bg-neutral-950 flex items-center justify-between">
+    <div className="grid h-dvh grid-cols-1 lg:grid-cols-[1fr_340px] text-sm">
+      {/* Ambient scene mood: a faint wash from the board's time of day and
+          mood. Pure CSS, no model; off via Settings → Visuals. */}
+      {config.images?.ambient !== false && ambientFor(sceneBoard) && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-10 transition-[background] duration-1000"
+          style={{ background: ambientFor(sceneBoard) as string }}
+        />
+      )}
+      <div className="relative isolate flex flex-col min-h-0">
+        {backdropUrl && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 -z-10 bg-cover bg-center opacity-45"
+            style={{ backgroundImage: `url("${backdropUrl}")` }}
+          />
+        )}
+        <header className="relative z-20 px-3 sm:px-6 py-3 border-b border-neutral-800 bg-neutral-950/70 backdrop-blur flex flex-wrap items-center justify-between gap-y-2">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setView("library")}
@@ -3224,19 +3765,15 @@ function App() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs cursor-pointer text-neutral-400 hover:text-neutral-200 border border-neutral-800 rounded px-2.5 py-1">
-              + card
-              <input
-                type="file"
-                accept=".png,.json"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.currentTarget.files?.[0];
-                  if (f) onImportCard(f);
-                }}
-              />
-            </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="lg:hidden text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-2.5 py-1"
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open memory and sessions panel"
+              aria-expanded={drawerOpen}
+            >
+              ☰ panel
+            </button>
             {formedSkillCount > 0 && (
               <button
                 className="text-[10px] font-mono rounded border border-amber-700/60 text-amber-400 hover:bg-amber-900/30 px-1.5 py-0.5 transition-colors"
@@ -3256,38 +3793,22 @@ function App() {
               onSelect={(id) => onPickPreset(id)}
               onReapply={() => onPickPreset(activePresetId)}
             />
-            <div
-              className="w-px h-5 bg-neutral-800 mx-1"
-              aria-hidden
-            />
+            <SyncBadge />
+            <ThemeMenu />
             <button
-              className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-100 px-2.5 py-1"
-              onClick={() => setPromptInspectorOpen(true)}
-              title="see what was sent to the LLM on the last turn"
-            >
-              prompt
-            </button>
-            <button
-              className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-100 px-2.5 py-1"
-              onClick={() => setBrowseGrimoireOpen(true)}
-              title="Browse + install Grimoire plugins"
-            >
-              grimoire
-            </button>
-            <button
-              className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-500 hover:text-neutral-200 w-7 h-7 flex items-center justify-center"
-              onClick={() => setHelpOpen(true)}
-              title="Keyboard shortcuts (?)"
-            >
-              ?
-            </button>
-            <button
-              className="text-xs rounded border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-100 px-2.5 py-1"
+              className="text-xs rounded-lg border border-neutral-700/70 bg-neutral-900/40 hover:border-emerald-500/60 text-neutral-300 hover:text-neutral-100 px-2.5 py-1.5"
               onClick={() => setSettingsOpen(true)}
               title={`Settings · ${backendLabel} · ${providerLabel}`}
             >
               settings
             </button>
+            <MoreMenu
+              onImportCard={onImportCard}
+              onOpenPrompt={() => setPromptInspectorOpen(true)}
+              onOpenGrimoire={() => setBrowseGrimoireOpen(true)}
+              onOpenHelp={() => setHelpOpen(true)}
+              onOpenAudit={openAudit}
+            />
           </div>
         </header>
         {characters.length > 0 && (
@@ -3496,10 +4017,80 @@ function App() {
               hasPriorSessions={sessions.length > 0}
             />
           ) : (
+            <div className="flex h-full min-h-0 flex-col">
+            {config.story_summary !== false && chronicleWriterRef.current && (
+              <StoryHud
+                chronicle={chronicle}
+                busy={chronicleBusy}
+                onEditChapter={(id, text) => updateChronicle(editChapter(chronicleRef.current, id, text))}
+                onDeleteChapter={(id) => updateChronicle(deleteChapter(chronicleRef.current, id))}
+                onEditEarlier={(text) => updateChronicle(editEarlier(chronicleRef.current, text))}
+                onRebuild={() => {
+                  if (sessionId) clearChronicle(sessionId);
+                  updateChronicle(emptyStory());
+                  window.setTimeout(() => void extendChronicle(), 50);
+                }}
+              />
+            )}
+            <SceneHud
+              state={sceneBoard}
+              tracking={
+                config.scene_tracking === false
+                  ? "off"
+                  : sceneTrackerRef.current
+                  ? "on"
+                  : "needs-model"
+              }
+              updating={sceneUpdating}
+              consequences={
+                config.consequences !== false && ledgerTrackerRef.current
+                  ? {
+                      deeds: openDeeds(ledger),
+                      turn: exchangeNo(turns),
+                      answered: ledger.deeds.filter((d) => d.status === "answered").length,
+                      onDismiss: (id: string) => {
+                        const next = dismissDeed(ledgerRef.current, id);
+                        ledgerRef.current = next;
+                        setLedger(next);
+                        if (sessionId) saveLedger(sessionId, next);
+                      },
+                    }
+                  : undefined
+              }
+              images={
+                config.images?.generate
+                  ? { busy: imageStatus.busy, error: imageStatus.error, hasBackdrop: !!backdropUrl, onRedraw: redrawBackdrop }
+                  : undefined
+              }
+              pacing={{
+                level: pacingLevel(config),
+                turnsUntil: turnsUntilBeat(sceneBoard, pacingLevel(config)),
+                lastBeat: BEATS.find((b) => b.id === sceneBoard.last_beat)?.label,
+                onChange: onPacingChange,
+              }}
+              onChange={(next) => {
+                setSceneBoard(next);
+                if (sessionId) saveScene(sessionId, next);
+              }}
+              onClear={() => {
+                setSceneBoard(emptySceneState());
+                if (sessionId) clearScene(sessionId);
+              }}
+            />
+            <div className="flex-1 min-h-0">
             <ChatPane
               turns={turns}
               onSend={onSend}
+              vision={
+                providerForRole(config, "vision")
+                  ? {
+                      label: `${providerForRole(config, "vision")!.model}${isLocalProvider(providerForRole(config, "vision")!) ? " (local)" : ""}`,
+                      describe: describeAttachedImage,
+                    }
+                  : undefined
+              }
               isThinking={thinking}
+              onStop={stopGeneration}
               streamingText={streamingText}
               slashCommands={grimoireSlashCommands}
               onSlashCommand={onSlashCommand}
@@ -3516,11 +4107,15 @@ function App() {
                 ...Object.fromEntries(characters.map((c) => [c.id, c.name])),
                 user: currentPersona().name,
               }}
-              speakerAvatars={Object.fromEntries(
-                characters
-                  .filter((c) => c.avatar_url)
-                  .map((c) => [c.id, c.avatar_url as string])
-              )}
+              speakerAvatars={{
+                ...generatedPortraits, // a card's own avatar always wins
+                ...Object.fromEntries(
+                  characters
+                    .filter((c) => c.avatar_url)
+                    .map((c) => [c.id, c.avatar_url as string])
+                ),
+              }}
+              hasBackdrop={!!backdropUrl}
               highlightTurnId={highlightTurnId}
               onEditMessage={onEditMessage}
               onDeleteMessage={onDeleteMessage}
@@ -3530,10 +4125,30 @@ function App() {
               onSwipeChange={onSwipeChange}
               onFork={onForkSession}
             />
+            </div>
+            </div>
           )}
         </div>
       </div>
-      <aside className="flex h-full flex-col bg-neutral-950 border-l border-neutral-800 overflow-hidden">
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={`flex flex-col bg-neutral-950/95 lg:bg-neutral-950/70 backdrop-blur border-l border-neutral-800 overflow-hidden
+          fixed inset-y-0 right-0 z-40 w-[88vw] max-w-[360px] transition-transform duration-200
+          ${drawerOpen ? "translate-x-0" : "translate-x-full"}
+          lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:h-full`}
+      >
+        <button
+          className="lg:hidden self-end m-2 text-xs text-neutral-400 hover:text-neutral-100 border border-neutral-800 rounded px-2 py-1"
+          onClick={() => setDrawerOpen(false)}
+        >
+          close ✕
+        </button>
         <SessionList
           sessions={sessions}
           activeId={sessionId ?? undefined}
@@ -3780,6 +4395,24 @@ function App() {
           </div>
         </div>
       </aside>
+      {auditOpen && (
+        <AuditModal
+          characterName={characters[0]?.name ?? "Character"}
+          traits={auditTraits}
+          onTraitsChange={setAuditTraits}
+          onExtract={() => void extractAuditTraits()}
+          extracting={auditExtracting}
+          report={auditReport}
+          running={auditRunning}
+          judgeLabel={auditJudge()?.label ?? null}
+          onRun={() => void startAudit()}
+          onCancel={() => {
+            auditCancel.current = true;
+          }}
+          onJump={jumpToTurn}
+          onClose={() => setAuditOpen(false)}
+        />
+      )}
       {settingsOpen && (
         <SettingsPanel
           config={config}

@@ -10,6 +10,10 @@ import type { McpServerRegistry } from "../../lib/mcp/registry";
 import { McpServersSection } from "./McpServersSection";
 import type { YantrikClient } from "../../lib/yantrikdb/client";
 import { DangerZone } from "./DangerZone";
+import { ThemePicker } from "./ThemePicker";
+import { VisualsSection } from "./VisualsSection";
+import { VisionSection } from "./VisionSection";
+import { StorageSection } from "./StorageSection";
 
 interface Props {
   config: ChroniclerConfig;
@@ -70,7 +74,7 @@ export function SettingsPanel({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/35 backdrop-blur-[2px] flex items-center justify-center z-50">
       <div className="bg-neutral-900 border border-neutral-800 rounded-lg w-[640px] max-h-[85vh] overflow-y-auto shadow-2xl">
         <header className="px-5 py-3 border-b border-neutral-800 flex items-center justify-between">
           <h2 className="text-base font-semibold">Settings</h2>
@@ -80,6 +84,8 @@ export function SettingsPanel({
         </header>
 
         <section className="p-5 space-y-5">
+          <ThemePicker />
+
           <PersonasSection
             personas={draft.user_personas ?? []}
             activeId={draft.active_persona_id}
@@ -95,6 +101,95 @@ export function SettingsPanel({
               })
             }
           />
+
+          <StorageSection />
+
+          <VisionSection value={draft} onChange={setDraft} />
+
+          <VisualsSection value={draft.images} onChange={(images) => setDraft({ ...draft, images })} />
+
+          <div>
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Scene board</h3>
+            <label className="flex items-start gap-2 border border-neutral-800 rounded-md p-3 bg-neutral-950 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={draft.scene_tracking !== false}
+                onChange={(e) => setDraft({ ...draft, scene_tracking: e.target.checked })}
+              />
+              <span className="text-[12px] text-neutral-300 leading-relaxed">
+                Keep the scene board up to date automatically
+                <span className="block text-[11px] text-neutral-500">
+                  After each reply, one small extra model call updates location, time, who is
+                  present, objectives and what you carry. You can always edit the board by hand.
+                  Works well from about a 4B-parameter model up; very small models (1–2B) miss
+                  changes and invent details, so turn this off for those.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Long-chat memory</h3>
+            <label className="flex items-start gap-2 border border-neutral-800 rounded-md p-3 bg-neutral-950 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={draft.story_summary !== false}
+                onChange={(e) => setDraft({ ...draft, story_summary: e.target.checked })}
+              />
+              <span className="text-[12px] text-neutral-300 leading-relaxed">
+                Keep a running "story so far"
+                <span className="block text-[11px] text-neutral-500">
+                  Older messages are summarised into short chapters, so a long roleplay still remembers what
+                  happened long ago — a promise, a name, where something was hidden. You can read and edit the
+                  chapters above the chat. Uses about one small extra model call per three exchanges.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Character identity</h3>
+            <label className="flex items-start gap-2 border border-neutral-800 rounded-md p-3 bg-neutral-950 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={draft.enact_traits === true}
+                onChange={(e) => setDraft({ ...draft, enact_traits: e.target.checked })}
+              />
+              <span className="text-[12px] text-neutral-300 leading-relaxed">
+                Spell out what a character's core traits look like on the page
+                <span className="block text-[11px] text-neutral-500">
+                  Once a character has developed core traits, each is shown to the model with a line such as
+                  "When she has caused harm, she does the thing that would have prevented it instead of
+                  saying sorry." In our tests this helped on average, not on every model, and it did not
+                  make small models reliable — treat it as experimental. Costs one small extra model call
+                  per new trait, using your background model. Off by default.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Consequences</h3>
+            <label className="flex items-start gap-2 border border-neutral-800 rounded-md p-3 bg-neutral-950 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={draft.consequences !== false}
+                onChange={(e) => setDraft({ ...draft, consequences: e.target.checked })}
+              />
+              <span className="text-[12px] text-neutral-300 leading-relaxed">
+                The world remembers what you do
+                <span className="block text-[11px] text-neutral-500">
+                  Thefts, lies, promises, violence and secrets are noted, and a few turns later the
+                  characters who saw or heard of them may act on it. Uses a small extra model call, only on
+                  turns where something consequential seems to have happened. Needs the scene board.
+                </span>
+              </span>
+            </label>
+          </div>
 
           <div>
             <h3 className="text-sm font-semibold text-neutral-200 mb-2">Proactive messages</h3>

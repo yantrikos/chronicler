@@ -2,6 +2,24 @@
 
 import type { RecallResult, Tier } from "../yantrikdb/types";
 
+/** An image the player shared. The bytes live in IndexedDB (never in the turn,
+ *  which is stored in localStorage); the turn keeps only this reference and the
+ *  description that entered the story. */
+export interface TurnAttachment {
+  /** SHA-256 of the stored bytes; the key in the attachment store. */
+  id: string;
+  kind: "image";
+  mime: string;
+  width: number;
+  height: number;
+  /** What entered the story — possibly edited by the player. Also the alt text. */
+  description: string;
+  /** Model that wrote the original description. */
+  described_by?: string;
+  /** True if the player changed the model's description. */
+  user_edited?: boolean;
+}
+
 export interface ChatTurn {
   id: string;
   role: "user" | "assistant" | "system";
@@ -15,6 +33,8 @@ export interface ChatTurn {
    *  reply; each regenerate appends a new entry and bumps swipe_index. */
   swipes?: string[];
   swipe_index?: number;
+  /** Images shared with this turn (user turns). */
+  attachments?: TurnAttachment[];
 }
 
 export interface PromptCapture {
@@ -86,6 +106,19 @@ export interface ComposedContext {
   scene: ChatTurn[]; // recent turns
   heuristic: RecallResult[]; // labeled "possibly"
   graph_neighborhood: RecallResult[];
+  /** Session-scoped facts established in this scene (location, what someone
+   *  is holding, mood…). Rendered as the <scene> block the ground-rules
+   *  clause already tells the model to trust. */
+  scene_state?: RecallResult[];
+  /** Phrases the character has leaned on across recent replies. Rendered as
+   *  a <style_notes> block asking the model to vary its wording. */
+  avoid_phrases?: string[];
+  /** Lines from the scene status board (location, time, who is present…).
+   *  Rendered at the top of the <scene> block. */
+  scene_status?: string[];
+  /** "The story so far" — chapters from the chronicle, as one text. Rendered
+   *  as a <story_so_far> block ahead of <canon>. */
+  story_so_far?: string;
   active_temporal_triggers: string[]; // narrative beats
   pending_conflicts_count: number; // shown in sidebar, not injected
   /** Skills that survived state filtering and made it into the prompt.

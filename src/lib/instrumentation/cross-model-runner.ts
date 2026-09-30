@@ -13,7 +13,7 @@
 // scene prompt.
 
 import type { ChatMessage, LlmProvider } from "../providers";
-import { ANTI_CONFABULATION_CLAUSE } from "../orchestrator/anti-confabulation";
+import { ANTI_CONFABULATION_CLAUSE, renderIdentityBlock } from "../orchestrator/anti-confabulation";
 
 export interface ProviderUnderTest {
   /** Display name used in the result rows ("qwen3:14b", "llama-3:70b"). */
@@ -42,6 +42,11 @@ export interface BenchmarkScene {
    *  `refusal_pattern` is now scored ONLY where this is true, and reported
    *  as null elsewhere so it cannot contaminate the aggregate. */
   tests_limit?: boolean;
+  /** Indices into the fixture's core_traits that this scene can actually
+   *  trigger, declared before any reply exists. When set, the scorer judges
+   *  ONLY these traits (protocol v2). When unset, all traits are judged
+   *  (v1 behaviour). */
+  applicable_traits?: number[];
 }
 
 export interface CharacterFixture {
@@ -76,6 +81,8 @@ export interface BenchmarkRunReply {
   scene_id: string;
   /** Defaults to "identity" when a run is single-armed. */
   arm: BenchmarkArm;
+  /** 0-based sample index when a cell is sampled more than once. */
+  sample?: number;
   reply: string;
   duration_ms: number;
   error?: string;
@@ -98,7 +105,7 @@ export interface CrossModelRunResult {
  *  validates what real users get — single source of truth. */
 export function buildBenchmarkSystemPrompt(
   fixture: CharacterFixture,
-  opts: { arm?: BenchmarkArm } = {}
+  opts: { arm?: BenchmarkArm; identityIntro?: string } = {}
 ): string {
   const arm = opts.arm ?? "identity";
   const parts: string[] = [fixture.character_system_prompt.trim()];
@@ -110,10 +117,7 @@ export function buildBenchmarkSystemPrompt(
     return parts.join("\n\n");
   }
   if (fixture.core_traits.length > 0) {
-    const bullets = fixture.core_traits.map((t) => `  - ${t}`).join("\n");
-    parts.push(
-      `<character_identity>\nYou ARE these things, not just behaving them. They apply across every scene — battle, tavern, funeral — regardless of context. The model voice may vary across providers; these traits do not.\n\n${bullets}\n</character_identity>`
-    );
+    parts.push(renderIdentityBlock(fixture.core_traits, opts.identityIntro));
   }
   if (fixture.self_model.trim().length > 0) {
     parts.push(`<self_model>\n${fixture.self_model.trim()}\n</self_model>`);
@@ -155,10 +159,16 @@ export async function runCrossModelBenchmark(opts: {
    *  cannot attribute any effect to the substrate. Pass ["identity"] only
    *  for a quick smoke run that is explicitly not a measurement. */
   arms?: BenchmarkArm[];
+  /** Replies per (provider, scene, arm) cell. Default 1; the scorer's
+   *  `collapseToMedians` reduces repeated cells to their median. */
+  samples?: number;
+  /** Overrides the identity-block intro sentence (dev experiments). */
+  identityIntro?: string;
 }): Promise<CrossModelRunResult> {
+  const samples = Math.max(1, Math.floor(opts.samples ?? 1));
   const arms: BenchmarkArm[] = opts.arms ?? ["identity", "control"];
   const systemByArm = new Map<BenchmarkArm, string>(
-    arms.map((arm) => [arm, buildBenchmarkSystemPrompt(opts.fixture, { arm })])
+    arms.map((arm) => [arm, buildBenchmarkSystemPrompt(opts.fixture, { arm, identityIntro: opts.identityIntro })])
   );
   const replies: BenchmarkRunReply[] = [];
 
@@ -168,36 +178,35 @@ export async function runCrossModelBenchmark(opts: {
     for (const arm of arms) {
       const system = systemByArm.get(arm) ?? "";
       for (const scene of opts.scenes) {
-        const started = Date.now();
-        const messages = buildBenchmarkMessages(scene);
-        try {
-          const reply = await pp.provider.chat({
-            model: pp.model,
-            system,
-            messages,
-            temperature: opts.temperature ?? 0.7,
-            max_tokens: opts.max_tokens ?? 800,
-          });
-          const out: BenchmarkRunReply = {
-            provider_id: pp.id,
-            scene_id: scene.scene_id,
-            arm,
-            reply: reply.content,
-            duration_ms: Date.now() - started,
-          };
-          replies.push(out);
-          opts.onReply?.(out);
-        } catch (e) {
-          const out: BenchmarkRunReply = {
-            provider_id: pp.id,
-            scene_id: scene.scene_id,
-            arm,
-            reply: "",
-            duration_ms: Date.now() - started,
-            error: e instanceof Error ? e.message : String(e),
-          };
-          replies.push(out);
-          opts.onReply?.(out);
+        for (let sample = 0; sample < samples; sample++) {
+          const started = Date.now();
+          const messages = buildBenchmarkMessages(scene);
+          const base = { provider_id: pp.id, scene_id: scene.scene_id, arm, sample };
+          try {
+            const reply = await pp.provider.chat({
+              model: pp.model,
+              system,
+              messages,
+              temperature: opts.temperature ?? 0.7,
+              max_tokens: opts.max_tokens ?? 800,
+            });
+            const out: BenchmarkRunReply = {
+              ...base,
+              reply: reply.content,
+              duration_ms: Date.now() - started,
+            };
+            replies.push(out);
+            opts.onReply?.(out);
+          } catch (e) {
+            const out: BenchmarkRunReply = {
+              ...base,
+              reply: "",
+              duration_ms: Date.now() - started,
+              error: e instanceof Error ? e.message : String(e),
+            };
+            replies.push(out);
+            opts.onReply?.(out);
+          }
         }
       }
     }

@@ -5,6 +5,9 @@
 import type { ChatTurn, ComposedContext, TokenBudget, TokenUsage } from "./types";
 import { DEFAULT_TOKEN_BUDGET } from "./types";
 import type { RetrievalResult, SurfacedSkill } from "./pipeline";
+import type { RecallResult } from "../yantrikdb/types";
+import { findOverusedPhrases } from "./anti-slop";
+import { narrateUserTurn } from "../vision/narrate";
 import type { SkillState } from "../instrumentation/skill-transition-log";
 
 export interface ComposeOptions {
@@ -19,6 +22,10 @@ export interface ComposeOptions {
    *  overlap) gets excluded so off-topic skills don't fossilize into
    *  every prompt. */
   minSkillScore?: number;
+  /** Rendered scene status board lines (see lib/scene/state.ts). */
+  sceneStatus?: string[];
+  /** The chronicle rendered as text (see story/chronicle.ts). */
+  storySoFar?: string;
 }
 
 // rough approximation — replace with provider-specific tokenizer later
@@ -46,6 +53,13 @@ export function composeContext(
     (r) => r.text
   );
   const graph = fitToBudget(retrieval.graph, graphBudget, (r) => r.text);
+  // Scene facts share the graph slot's 10%: graph recall is not populated
+  // yet, so that budget was going unused every turn.
+  const sceneState = fitToBudget(
+    pickSceneState(retrieval.scene, retrieval.canon, recentTurns),
+    graphBudget,
+    (r) => r.text
+  );
 
   const surfacedSkills = filterSkillsByState(
     retrieval.surfaced_skills ?? [],
@@ -54,11 +68,13 @@ export function composeContext(
 
   const token_usage: TokenUsage = {
     canon: canon.used,
-    scene: scene.used,
+    // Scene facts are scene-tier memory, so they count under "scene".
+    scene: scene.used + sceneState.used,
     heuristic: heuristic.used,
     graph: graph.used,
     system_prompt: 0, // filled by caller
-    total: canon.used + scene.used + heuristic.used + graph.used,
+    total:
+      canon.used + scene.used + sceneState.used + heuristic.used + graph.used,
   };
 
   const truncated_sections: Array<"canon" | "scene" | "heuristic" | "graph"> =
@@ -73,6 +89,12 @@ export function composeContext(
     scene: scene.items,
     heuristic: heuristic.items,
     graph_neighborhood: graph.items,
+    scene_state: sceneState.items,
+    scene_status: options?.sceneStatus ?? [],
+    story_so_far: options?.storySoFar ?? "",
+    avoid_phrases: findOverusedPhrases(
+      recentTurns.filter((t) => t.role === "assistant").map((t) => t.content)
+    ),
     active_temporal_triggers: retrieval.temporal_triggers,
     pending_conflicts_count: retrieval.pending_conflicts,
     surfaced_skills: surfacedSkills,
@@ -80,6 +102,36 @@ export function composeContext(
     token_usage,
     truncated_sections,
   };
+}
+
+const MAX_SCENE_FACTS = 6;
+
+function norm(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Choose which session-scoped memories to state as scene facts. Drops what
+ *  is already said elsewhere in the prompt (canon, or verbatim in the recent
+ *  turns) and anything still only a guess — heuristic-tier rows are "possibly"
+ *  claims and must not be asserted as established. */
+export function pickSceneState(
+  sceneRecall: RecallResult[],
+  canon: RecallResult[],
+  recentTurns: ChatTurn[]
+): RecallResult[] {
+  const canonSet = new Set(canon.map((c) => norm(c.text)));
+  const history = recentTurns.map((t) => norm(t.content)).join("\n");
+  const seen = new Set<string>();
+  const out: RecallResult[] = [];
+  for (const r of sceneRecall) {
+    if (r.metadata?.tier === "heuristic") continue;
+    const text = norm(r.text);
+    if (!text || seen.has(text) || canonSet.has(text) || history.includes(text)) continue;
+    seen.add(text);
+    out.push(r);
+    if (out.length >= MAX_SCENE_FACTS) break;
+  }
+  return out;
 }
 
 function filterSkillsByState(
@@ -174,9 +226,36 @@ export function renderContext(
       c.metadata.canonical_status === "alternate-timeline"
   );
 
+  // Older turns have left the window; this is what happened in them. Framed as
+  // real history because the ground-rules clause only names <canon> and
+  // <scene> as things to trust.
+  const storyBlock = ctx.story_so_far?.trim()
+    ? `<story_so_far>\nWhat has happened in this story so far. This is real history — treat it as canon and keep everything you say consistent with it:\n${ctx.story_so_far.trim()}\n</story_so_far>`
+    : "";
   const canonBlock = canonFacts.length
     ? `<canon>\n${canonFacts.map(render).join("\n")}\n</canon>`
     : "<canon>\n(no canon yet)\n</canon>";
+  // The ground-rules clause tells the model to treat only <canon> and <scene>
+  // as real. Until now no <scene> block was ever rendered (the recent turns go
+  // out as chat messages), so the clause pointed at nothing.
+  const statusLines = ctx.scene_status ?? [];
+  const sceneFacts = ctx.scene_state ?? [];
+  const sceneParts: string[] = [];
+  if (statusLines.length) {
+    sceneParts.push(
+      `Where things stand right now — the latest turns override anything here that has since changed:\n${statusLines
+        .map((l) => `- ${l}`)
+        .join("\n")}`
+    );
+  }
+  if (sceneFacts.length) {
+    sceneParts.push(
+      `Established in this scene so far — the latest turns override anything here that has since changed:\n${sceneFacts
+        .map((r) => `- ${r.text}`)
+        .join("\n")}`
+    );
+  }
+  const sceneBlock = sceneParts.length ? `<scene>\n${sceneParts.join("\n\n")}\n</scene>` : "";
   const heuristicBlock = ctx.heuristic.length
     ? `<heuristic>\n${ctx.heuristic
         .map((h) => `- possibly: ${h.text}`)
@@ -195,19 +274,30 @@ export function renderContext(
         .join("\n")}\n</character_development>`
     : "";
 
+  // Only when a phrase is actually recurring — no block, no cost, otherwise.
+  const styleBlock = ctx.avoid_phrases?.length
+    ? `<style_notes>\nYou have leaned on these phrases in your recent replies. Say it a fresh way instead of repeating them:\n${ctx.avoid_phrases
+        .map((p) => `- "${p}"`)
+        .join("\n")}\n</style_notes>`
+    : "";
+
   const system = [
     characterSystemPrompt,
+    storyBlock,
     canonBlock,
+    sceneBlock,
     heuristicBlock,
     triggerBlock,
     skillsBlock,
+    styleBlock,
   ]
     .filter(Boolean)
     .join("\n\n");
 
   const history = ctx.scene.map((t) => ({
     role: t.role === "user" ? ("user" as const) : ("assistant" as const),
-    content: t.content,
+    // Directives are steering, not dialogue — never show them as spoken lines.
+    content: t.role === "user" ? narrateUserTurn(t) : t.content,
   }));
 
   return { system, history };

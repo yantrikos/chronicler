@@ -2,6 +2,50 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.0] — 2026-09-30 — A better place to play, and honest measurement
+
+A large release: a redesigned interface, tools for long and steerable roleplay, durable server-side storage, optional graphics and vision, a character
+consistency audit, and a benchmark series that says plainly what the identity layer does and does not do. (There are no changelog entries for 0.4.0 and 0.5.0
+in this file; see the git history for those.)
+
+### Added
+- **Themes and a redesigned UI.** A live theme switcher (default plus several light and dark themes), a centered chat column, steering chips,
+  auto-scroll with a "jump to latest" button, a Stop button that really stops generation, and a mobile drawer.
+- **Steering.** Out-of-character notes — `((…))`, `[OOC: …]` or `(OOC: …)` — reach the model once as a private director's note and are never stored as something a
+  character said; plus a director row; overused phrases are detected and steered away from.
+- **Scene board.** A live board of location, time, who is present, objectives and what you carry, kept current by a small extra model call (grounded and
+  guarded against invented details; you can edit it by hand). Optional pacing beats ("gentle" / "lively") and a **consequence ledger** that remembers consequential
+  things you do and lets the world answer them later.
+- **Long-chat memory.** A running "story so far" of short chapters written once and merged as they age, so a long roleplay still remembers a promise or a name
+  from long ago.
+- **Durable storage.** Chats and settings are also kept on the Chronicler server (revisioned, with conflict handling), so clearing a browser no longer loses a
+  story. localStorage remains the working copy. The bundled `docker-compose.yml` adds a `chronicler-data` volume for this (custom compose files need it too).
+  See `docs/STORAGE.md`.
+- **Optional graphics and vision.** Ambient scene mood, generated portraits and backdrops via a backend you configure, and image attachments that a vision model
+  *describes* first — you edit the description, and only the description enters the story. Separate models can be set per role. All opt-in.
+- **Character consistency audit.** *More → Check character consistency* compares a chat's replies against the character's declared traits and lists likely
+  contradictions with the quoted line and a jump-to-message link. It reports what it found and what it may have missed.
+- **Optional trait restatements (off by default).** *Settings → Character identity*: each core trait is shown to the model with an "On the page:" line saying what
+  the character concretely does. Experimental — see the results below.
+- **Memory engine upgraded** to YantrikDB 0.24 (engine 0.23.1). Back up the `chronicler-memory` Docker volume before upgrading an existing install.
+
+### Fixed
+- The core-trait verifier rejected almost every genuine behavioral trait (it demanded traits hold in every possible scene). It now accepts traits triggered by a
+  *kind* of situation, and still rejects place-, object- and task-tied ones. On real traits it accepts 5–6 of 8 (was 0–2 of 8) with 0 of 26 wrongly accepted.
+
+### Measured — read this before relying on the identity layer
+A series of five pre-registered benchmarks (protocols written before each run; fresh scenes; a control arm; a 35B judge; median of three samples) found:
+- The identity layer gives a **large, consistent lift** in how well models embody a character's declared traits (+0.13 to +0.49 over a no-identity control, every
+  model, every run).
+- It did **not reach the fidelity bar we set in advance** (0.50) in any run (best mean 0.47; the 9B model alone was at or above 0.50 in three runs and just under, 0.498, in the final default-layer run), including a final run
+  scoped in advance to the two larger models. Style traits are embodied well; traits that ask for a specific behavior (deflecting with humor, apologizing through
+  action) are embodied poorly, and small (7B) models stay near the floor.
+- This does **not** support a claim of model-independent character. An earlier published headline (σ = 0.087) was retracted in August; the full record is in
+  `docs/CHARACTER-EMERGENCE-RESULTS.md` and `docs/BENCHMARK-RUN-v5-2026-09-30.md`.
+- The benchmarks use one hand-authored character and one LLM judge; they say nothing about whether real play forms a good identity block.
+
+---
+
 ## [0.3.1] — 2026-06-06 — Preferences substrate round-trips
 
 Bug fix: the preferences substrate appeared empty in the inspector even after the verifier successfully wrote 12 entries. Root cause: YantrikDB's `memory.list` and `recall` responses don't include the `metadata` map at all (verified empirically by direct MCP probe — write with `pref_state: "active"` then read returns no metadata field). The substrate was writing fields YantrikDB never exposed back.

@@ -17,6 +17,8 @@ import { assertParticipant, sceneVisibleTo, type Scene } from "./scene";
 import { scanLorebook, partitionByPosition } from "./lorebook";
 import type { SkillState } from "../instrumentation/skill-transition-log";
 import { runToolLoop, type ToolInvocation } from "./tool-loop";
+import { splitOoc } from "./ooc";
+import { imageDirection, narrateUserTurn } from "../vision/narrate";
 
 export interface OrchestratorDeps {
   client: YantrikClient;
@@ -109,7 +111,19 @@ export class Orchestrator {
        *  URI is fetched in parallel with YantrikDB recalls and merged
        *  into canon-equivalent retrieval. See src/lib/mcp/resource-opt-in.ts. */
       mcpEnabledResources?: string[];
+      /** A private pacing beat to weave into this reply; see lib/scene/pacing.ts. */
+      storyBeat?: string;
+      /** Open deeds due to be answered; see lib/scene/ledger.ts. */
+      consequences?: string[];
+      /** The chronicle as text; see lib/story/chronicle.ts. */
+      storySoFar?: string;
+      /** Scene status board lines for this turn; see lib/scene/state.ts. */
+      sceneStatus?: string[];
       onChunk?: (chunk: string, accumulated: string) => void;
+      /** Aborts generation. Text streamed before the abort is kept as the
+       *  reply; if nothing had streamed yet the turn rejects with an
+       *  AbortError and no turn is produced. */
+      signal?: AbortSignal;
     }
   ): Promise<{
     assistant_turn: ChatTurn;
@@ -126,19 +140,21 @@ export class Orchestrator {
   }> {
     if (scene) assertParticipant(scene, req.speaker);
     const t0 = performance.now();
-    const [retrieval, recent] = await Promise.all([
-      retrieveForTurn(this.deps.client, req, {
-        mcpEnabledResources: opts?.mcpEnabledResources,
-        mcpRegistry: this.deps.mcpRegistry,
-      }),
-      this.deps.getRecentTurns(req.session_id),
-    ]);
+    // History is read first so a short user message can be anchored to what
+    // it replies to when building the recall query.
+    const recent = await this.deps.getRecentTurns(req.session_id);
+    const retrieval = await retrieveForTurn(this.deps.client, req, {
+      mcpEnabledResources: opts?.mcpEnabledResources,
+      mcpRegistry: this.deps.mcpRegistry,
+      recentTurns: recent,
+    });
     const t1 = performance.now();
 
     // Build scan text from the current user message + most-recent turns for
     // lorebook keyword matching. Default scan depth = 3 messages back.
     const scanText = [
       req.user_message?.content ?? "",
+      req.user_message ? imageDirection(req.user_message) : "",
       ...recent.slice(-3).map((t) => t.content),
     ]
       .filter((s) => s.length > 0)
@@ -155,6 +171,8 @@ export class Orchestrator {
 
     const composed = composeContext(retrieval, recent, req.token_budget, {
       getSkillState: this.deps.getSkillState,
+      sceneStatus: opts?.sceneStatus,
+      storySoFar: opts?.storySoFar,
     });
     // When depth > 0 the author note is injected into the history stream
     // instead of the system prompt — pass it to anti-confab only at depth 0.
@@ -165,6 +183,9 @@ export class Orchestrator {
       withAntiConfabulation(characterSystemPrompt, {
         userPersona: this.deps.userPersona,
         authorNote: noteInSystemPrompt,
+        directorNote: splitOoc(req.user_message?.content ?? "").directives,
+        storyBeat: opts?.storyBeat,
+        consequences: opts?.consequences,
         lorebookBefore: loreBefore,
         lorebookAfter: loreAfter,
         intensitySnippet: opts?.intensitySnippet,
@@ -178,7 +199,7 @@ export class Orchestrator {
     if (req.user_message) {
       rendered.history.push({
         role: "user",
-        content: req.user_message.content,
+        content: narrateUserTurn(req.user_message),
       });
     }
 
@@ -245,6 +266,7 @@ export class Orchestrator {
       messages: rendered.history,
       max_tokens: this.deps.maxResponseTokens ?? 1024,
       sampling: this.deps.sampling,
+      signal: opts?.signal,
     };
     let reply: { content: string };
     let toolInvocations: ToolInvocation[] = [];
@@ -270,9 +292,15 @@ export class Orchestrator {
     } else if (opts?.onChunk && this.deps.provider.stream) {
       // Streaming path: accumulate chunks and emit them to the UI.
       let acc = "";
-      for await (const chunk of this.deps.provider.stream(chatReq)) {
-        acc += chunk;
-        opts.onChunk(chunk, acc);
+      try {
+        for await (const chunk of this.deps.provider.stream(chatReq)) {
+          acc += chunk;
+          opts.onChunk(chunk, acc);
+        }
+      } catch (err) {
+        // A user Stop mid-stream is not a failure: keep what arrived.
+        // Anything else (network, provider error) still propagates.
+        if (!opts.signal?.aborted || acc.length === 0) throw err;
       }
       reply = { content: acc };
     } else {
@@ -322,7 +350,9 @@ export class Orchestrator {
           session_id: req.session_id,
           speaker: req.speaker,
           character: req.character,
-          user_turn: req.user_message,
+          // Directives are steering, not facts: extract only from what the
+          // player actually said in character (nothing, for a pure directive).
+          user_turn: sanitizedUserTurn(req.user_message),
           assistant_turn,
           visible_to: scene ? sceneVisibleTo(scene) : ["*"],
           extractor: this.deps.extractor,
@@ -362,4 +392,13 @@ export class Orchestrator {
       tool_invocations: toolInvocations,
     };
   }
+}
+
+/** The user turn as memory extraction should see it — OOC directives removed.
+ *  A turn that was only a directive yields no user turn at all. */
+function sanitizedUserTurn(turn: ChatTurn | undefined): ChatTurn | undefined {
+  if (!turn) return undefined;
+  const { spoken, directives } = splitOoc(turn.content);
+  if (directives.length === 0) return turn;
+  return spoken ? { ...turn, content: spoken } : undefined;
 }

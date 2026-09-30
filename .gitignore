@@ -40,3 +40,6 @@ Thumbs.db
 
 # Tauri leftovers (we removed Tauri but be defensive)
 /src-tauri/target
+
+# Durable storage written by the server at runtime (chats, images)
+/data

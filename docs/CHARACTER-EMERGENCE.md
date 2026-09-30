@@ -4,6 +4,12 @@
 >
 > — The Phase 11 reframe, 2026-06-08
 
+> **Status note (2026-09-30).** This document is the *design intent* for Phase 11, written before it was measured. It is not a result. Five pre-registered
+> benchmark runs since then found that the identity layer gives a large, consistent lift in trait embodiment over a no-identity control, but did **not**
+> reach the fidelity bar we set, and did not support "model-independent character" — see [CHARACTER-EMERGENCE-RESULTS.md](./CHARACTER-EMERGENCE-RESULTS.md)
+> and [BENCHMARK-RUN-v5-2026-09-30.md](./BENCHMARK-RUN-v5-2026-09-30.md). The positioning paragraphs below ("model-independent", "the only ✅") describe what
+> we hoped to be able to say; we are not saying it.
+
 ## The thesis
 
 Chronicler's product story shifts from *"remembers across sessions"* to *"becomes themselves across sessions."* The character is not in the LLM weights — the character is in the substrate. The LLM is the **voice** (a particular way of expressing whatever's there); the substrate is the **self**. Swap Qwen → Llama → Mistral and the SAME character emerges through the same substrate. Swap context (battle, tavern, funeral) and the CORE of who they are stays stable.

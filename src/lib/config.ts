@@ -30,6 +30,9 @@ export interface ProviderConfigEntry {
    *  enough for ~750 words. Users running tiny local models (or who
    *  prefer terse replies) can lower it per-provider in Settings. */
   max_response_tokens?: number;
+  /** Whether this model can read images. Auto-detected for Ollama (its
+   *  /api/show lists a "vision" capability); set by hand for other kinds. */
+  supports_vision?: boolean;
 }
 
 /** Default cap on a single LLM reply. ~750 words. */
@@ -43,10 +46,17 @@ export interface UserPersona {
   description?: string;
 }
 
+import type { ImagesConfig } from "./images/types";
+
 export interface ChroniclerConfig {
   yantrikdb: YantrikConfig;
   active_provider_id?: string;
   extraction_provider_id?: string;
+  /** Provider per role. Only `vision` is written here today; `chat` and
+   *  `background` are still the two legacy fields above, which Settings edits
+   *  — so providerForRole reads roles.chat/background first but nothing sets
+   *  them yet, and there is no second source of truth to fall out of step. */
+  roles?: Partial<Record<ProviderRole, string>>;
   providers: ProviderConfigEntry[];
   /** @deprecated Single persona kept for migration. Read user_personas instead;
    *  loadConfig() migrates legacy data so this field is empty in new installs. */
@@ -68,6 +78,30 @@ export interface ChroniclerConfig {
    *  been idle N seconds AND a trigger exists. aggressive = any time a
    *  trigger arrives at high pressure. */
   proactive_mode?: "off" | "passive" | "aggressive";
+  /** Keep the scene status board (location, time, who is present…) up to
+   *  date automatically after each reply. One small extra model call per
+   *  turn. Default: on. */
+  scene_tracking?: boolean;
+  /** Story pacing: after the scene board has been still for a while, the
+   *  director hands the model one private story beat. Needs the scene board.
+   *  Default: "gentle". */
+  pacing?: "off" | "gentle" | "lively";
+  /** Consequence ledger: remember consequential things the player does and
+   *  let the world answer them later. A small extra model call, only on turns
+   *  where something consequential seems to have happened. Default: on. */
+  consequences?: boolean;
+  /** Keep a running "story so far" for long chats: older messages are
+   *  summarised into chapters and shown to the model alongside the recent ones.
+   *  About one small extra model call per three exchanges. Default: on. */
+  story_summary?: boolean;
+  /** Show each core trait to the model with an "On the page:" line stating
+   *  what the character concretely does. Measured to help on average, not on
+   *  every model (docs/BENCHMARK-RUN-v4-2026-09-30.md). One small extra model
+   *  call per new core trait. Default: off. */
+  enact_traits?: boolean;
+  /** Optional graphics: ambient scene mood, and generated portraits and
+   *  location backdrops via a backend the user configures. All opt-in. */
+  images?: ImagesConfig;
   /** Idle threshold in seconds for passive mode. */
   proactive_idle_seconds?: number;
   /** Default sampling preset id for newly-created sessions. Sessions remember
@@ -157,6 +191,20 @@ export function defaultConfig(): ChroniclerConfig {
     user_personas: [{ id: "default", name: "You" }],
     active_persona_id: "default",
   };
+}
+
+export type ProviderRole = "chat" | "background" | "vision";
+
+/** The provider for a role. `vision` is the explicitly assigned one, else the
+ *  chat provider if it can read images, else none. */
+export function providerForRole(cfg: ChroniclerConfig, role: ProviderRole): ProviderConfigEntry | undefined {
+  const byId = (id?: string) => (id ? cfg.providers.find((p) => p.id === id) : undefined);
+  if (role === "chat") return byId(cfg.roles?.chat) ?? activeProvider(cfg);
+  if (role === "background") return byId(cfg.roles?.background) ?? extractionProvider(cfg);
+  const assigned = byId(cfg.roles?.vision);
+  if (assigned) return assigned;
+  const chat = providerForRole(cfg, "chat");
+  return chat?.supports_vision ? chat : undefined;
 }
 
 export function activeProvider(cfg: ChroniclerConfig): ProviderConfigEntry | undefined {

@@ -12,6 +12,10 @@
 export interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
+  /** Base64-encoded JPEG images (no `data:` prefix) attached to this message,
+   *  for vision-capable models. Each provider serializes them in its own
+   *  format; see openAIContent / anthropicContent / geminiParts. */
+  images?: string[];
   /** When role is "assistant" and the model emitted tool calls, the
    *  provider populates this. Reflected back in follow-up requests so
    *  the LLM has continuity. Format follows OpenAI's tool-calling spec. */
@@ -67,6 +71,9 @@ export interface ChatRequest {
   /** Optional tool_choice — "auto" (default), "none", or a specific
    *  tool name. Reserved; defaults to "auto" when tools is set. */
   tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
+  /** Aborts the in-flight request (and any open stream) when triggered —
+   *  drives the UI's Stop button. Providers pass it to the underlying fetch. */
+  signal?: AbortSignal;
 }
 
 export interface ChatResponse {
@@ -93,6 +100,36 @@ export async function collectStream(
   return { content };
 }
 
+// --- Vision serialization ---
+// One image format in (base64 JPEG), four wire formats out. Ollama takes
+// `images` on the message as-is; the others need their own shapes.
+
+export const IMAGE_MIME = "image/jpeg";
+
+/** OpenAI-compatible chat: content becomes text + image_url parts. */
+export function openAIContent(m: ChatMessage): string | unknown[] {
+  if (!m.images?.length) return m.content;
+  return [
+    { type: "text", text: m.content },
+    ...m.images.map((b64) => ({ type: "image_url", image_url: { url: `data:${IMAGE_MIME};base64,${b64}` } })),
+  ];
+}
+
+export function anthropicContent(m: ChatMessage): string | unknown[] {
+  if (!m.images?.length) return m.content;
+  return [
+    ...m.images.map((b64) => ({ type: "image", source: { type: "base64", media_type: IMAGE_MIME, data: b64 } })),
+    { type: "text", text: m.content },
+  ];
+}
+
+export function geminiParts(m: ChatMessage): unknown[] {
+  return [
+    ...(m.images ?? []).map((b64) => ({ inline_data: { mime_type: IMAGE_MIME, data: b64 } })),
+    { text: m.content },
+  ];
+}
+
 // --- Proxy fetch ---
 //
 // In the browser, the relative path /api/llm resolves against window origin
@@ -115,10 +152,12 @@ interface ProxyFetchOpts {
   method?: string;
   headers?: Record<string, string>;
   body?: unknown;
+  signal?: AbortSignal;
 }
 
 async function proxyFetch(opts: ProxyFetchOpts): Promise<Response> {
   return fetch(PROXY_ENDPOINT, {
+    signal: opts.signal,
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -129,6 +168,19 @@ async function proxyFetch(opts: ProxyFetchOpts): Promise<Response> {
     }),
   });
 }
+
+/** One JSON POST through the same-origin proxy (no CORS, keys stay on the
+ *  host). Used by the optional image backends. */
+export const proxyPostJson: import("../images/types").PostJson = async (url, headers, body, signal) => {
+  const res = await proxyFetch({ target_url: url, headers, body, signal });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("backend did not return JSON");
+  }
+};
 
 // --- OpenAI-compatible ---
 
@@ -150,7 +202,7 @@ export class OpenAICompatProvider implements LlmProvider {
     // messages may include {tool_calls: [...]} when reflecting prior
     // calls back so the model has continuity across loop iterations.
     const messages = req.messages.map((m) => {
-      const base: Record<string, unknown> = { role: m.role, content: m.content };
+      const base: Record<string, unknown> = { role: m.role, content: openAIContent(m) };
       if (m.tool_calls && m.tool_calls.length > 0) base.tool_calls = m.tool_calls;
       if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
       return base;
@@ -187,6 +239,7 @@ export class OpenAICompatProvider implements LlmProvider {
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: `${this.baseUrl}/chat/completions`,
       headers: this.buildHeaders(),
       body: this.buildBody(req, false),
@@ -241,6 +294,7 @@ export class OpenAICompatProvider implements LlmProvider {
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: `${this.baseUrl}/chat/completions`,
       headers: this.buildHeaders(),
       body: this.buildBody(req, true),
@@ -300,6 +354,7 @@ export class OllamaProvider implements LlmProvider {
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: this.apiUrl(),
       headers: { "content-type": "application/json" },
       body: this.buildBody(req, false),
@@ -325,6 +380,7 @@ export class OllamaProvider implements LlmProvider {
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: this.apiUrl(),
       headers: { "content-type": "application/json" },
       body: this.buildBody(req, true),
@@ -371,7 +427,7 @@ export class AnthropicProvider implements LlmProvider {
     return {
       model: req.model,
       system: req.system,
-      messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: req.messages.map((m) => ({ role: m.role, content: anthropicContent(m) })),
       max_tokens: req.max_tokens ?? 1024,
       temperature: s.temperature ?? req.temperature ?? 0.9,
       top_p: s.top_p,
@@ -390,6 +446,7 @@ export class AnthropicProvider implements LlmProvider {
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: `${this.apiUrl}/v1/messages`,
       headers: this.buildHeaders(),
       body: this.buildBody(req, false),
@@ -417,6 +474,7 @@ export class AnthropicProvider implements LlmProvider {
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: `${this.apiUrl}/v1/messages`,
       headers: this.buildHeaders(),
       body: this.buildBody(req, true),
@@ -456,7 +514,7 @@ export class GeminiProvider implements LlmProvider {
       .filter((m) => m.role !== "system")
       .map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
+        parts: geminiParts(m),
       }));
     return {
       contents,
@@ -484,6 +542,7 @@ export class GeminiProvider implements LlmProvider {
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: this.endpoint(req.model, false),
       headers: { "content-type": "application/json" },
       body: this.buildBody(req),
@@ -508,6 +567,7 @@ export class GeminiProvider implements LlmProvider {
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
     const res = await proxyFetch({
+      signal: req.signal,
       target_url: this.endpoint(req.model, true),
       headers: { "content-type": "application/json" },
       body: this.buildBody(req),

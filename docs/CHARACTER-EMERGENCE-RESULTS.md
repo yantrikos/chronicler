@@ -13,6 +13,10 @@
 >
 > **Nothing in this document should be cited as evidence that Chronicler produces model-independent character.** A re-specified benchmark is described under [What a valid rerun requires](#what-a-valid-rerun-requires).
 
+> ## UPDATE — 2026-09-30: the corrected benchmark has been run
+>
+> The re-specified measurement described under [What a valid rerun requires](#what-a-valid-rerun-requires) now exists (control arm, LLM-judged traits, median-of-3, larger judge, pre-registered thresholds). Five runs, all **FAIL** on absolute fidelity (0.36 / 0.44 / 0.42 / 0.47 / 0.45 against a 0.50 bar) while showing a consistent, sizeable lift over the control arm (+0.20 to +0.35 mean). The last run tested a narrowed claim, declared in advance, about the two larger models only, and also failed. See [BENCHMARK-RUN-v5-2026-09-30.md](./BENCHMARK-RUN-v5-2026-09-30.md) for the summary of all five. Nothing here changes the correction above: this document still must not be cited as evidence of model-independent character.
+
 ## Headline
 
 **This run does not demonstrate the Phase 11 thesis.**

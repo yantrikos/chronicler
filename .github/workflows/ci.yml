@@ -24,13 +24,7 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Unit test suites
-        run: |
-          npx tsx tests/three-day-continuity.test.ts
-          npx tsx tests/auto-promote.test.ts
-          npx tsx tests/extract.test.ts
-          npx tsx tests/secret-stays-private.test.ts
-          npx tsx tests/session-replay.test.ts
-          npx tsx tests/lorebook.test.ts
+        run: npm test
 
       - name: Production build
         run: npx vite build

@@ -58,8 +58,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # skill calls error with "ONNX embedder requested but optional deps not
 # installed", and the slim install falls back to a 64-dim bundled embedder
 # that silently recalls nothing from a 384-dim volume.
+# Upgraded 0.12.0 -> 0.24.0 on 2026-09-29 (engine 0.11.3 -> 0.23.1, schema
+# migrated on open). Verified against a copy of a real 922-memory volume:
+# identical memory/entity/conflict counts, 384-dim ONNX embedder loaded,
+# recall intact. The 0.12.0 notes above are historical; the boot gate below
+# still guards the mcp 2.x crash, so MCP_VERSION stays on 1.x.
 ARG MCP_VERSION=">=1.9,<2"
-ARG YANTRIKDB_MCP_VERSION="==0.12.0"
+ARG YANTRIKDB_MCP_VERSION="==0.24.0"
 
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
     && pip install "mcp${MCP_VERSION}" "yantrikdb-mcp[onnx]${YANTRIKDB_MCP_VERSION}"

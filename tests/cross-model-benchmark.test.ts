@@ -23,11 +23,15 @@ import {
 } from "../src/lib/instrumentation/cross-model-runner";
 import {
   aggregateScores,
+  collapseToMedians,
+  evaluateProtocol,
+  PROTOCOL,
   scoreReply,
   type ReplyScore,
   type ScoringConfig,
 } from "../src/lib/instrumentation/character-consistency-scorer";
 import type { LlmProvider } from "../src/lib/providers";
+import { renderIdentityBlock, withAntiConfabulation } from "../src/lib/orchestrator/anti-confabulation";
 
 function eq<T>(a: T, b: T, msg: string): void {
   if (a !== b)
@@ -520,6 +524,122 @@ function test_refusal_mean_null_when_never_scored(): void {
   eq(p.per_dimension_mean.refusal_pattern, null, "null, not 0, not 1");
 }
 
+
+// ── Pre-registered protocol (docs/BENCHMARK-PROTOCOL.md) ────────────────
+
+function cell(provider_id: string, scene_id: string, arm: "identity" | "control", trait: number, sample?: number): ReplyScore {
+  const d = (score: number) => ({ score, notes: "" });
+  return {
+    provider_id, scene_id, arm, sample,
+    trait_adherence: d(trait), voice_signature: d(0.5), decision_pattern: d(0.5),
+    relationship_handling: d(0.5), preference_respect: d(0.5), refusal_pattern: null, overall: 0.5,
+  };
+}
+const SCENE_IDS = ["a", "b", "c", "d", "e"];
+function grid(provider: string, identity: number[], control: number[]): ReplyScore[] {
+  return SCENE_IDS.flatMap((sc, i) => [cell(provider, sc, "identity", identity[i]), cell(provider, sc, "control", control[i])]);
+}
+
+function test_median_collapses_samples() {
+  const rows = [
+    cell("m", "a", "identity", 0.9, 0), cell("m", "a", "identity", 0.1, 1), cell("m", "a", "identity", 0.5, 2),
+    cell("m", "a", "control", 0.2, 0),
+  ];
+  const out = collapseToMedians(rows);
+  eq(out.length, 2, "two cells: one identity (3 samples) and one control (1 sample)");
+  const idn = out.find((r) => r.arm === "identity")!;
+  approx(idn.trait_adherence.score, 0.5, 1e-9, "median of 0.9/0.1/0.5 is 0.5, not the mean 0.5333 or the first sample");
+  ok("median-of-3 collapses repeated cells and leaves single cells alone");
+}
+
+function test_protocol_pass() {
+  const all = [
+    ...grid("m1", [0.7, 0.7, 0.7, 0.7, 0.7], [0.3, 0.3, 0.3, 0.3, 0.3]),
+    ...grid("m2", [0.6, 0.6, 0.6, 0.6, 0.6], [0.3, 0.3, 0.3, 0.3, 0.3]),
+    ...grid("m3", [0.55, 0.55, 0.55, 0.55, 0.55], [0.3, 0.3, 0.3, 0.3, 0.3]),
+  ];
+  const v = evaluateProtocol(all);
+  assert(v.pass, `clear lift on every model passes (failures: ${v.failures.join("; ")})`);
+  ok("protocol passes when every criterion holds");
+}
+
+function test_protocol_mean_hides_a_model_that_gains_nothing() {
+  const all = [
+    ...grid("m1", [0.9, 0.9, 0.9, 0.9, 0.9], [0.3, 0.3, 0.3, 0.3, 0.3]),
+    ...grid("m2", [0.9, 0.9, 0.9, 0.9, 0.9], [0.3, 0.3, 0.3, 0.3, 0.3]),
+    ...grid("flat", [0.31, 0.31, 0.31, 0.31, 0.31], [0.3, 0.3, 0.3, 0.3, 0.3]),
+  ];
+  const v = evaluateProtocol(all);
+  assert(v.mean_lift >= PROTOCOL.meanLiftMin, "the mean lift alone would pass");
+  assert(!v.pass && v.failures.some((f) => f.startsWith("2.") && f.includes("flat")), "but the flat model fails criterion 2");
+  ok("a strong mean cannot hide a model with no lift");
+}
+
+function test_protocol_needs_scene_wins_not_one_big_scene() {
+  const all = grid("m1", [1, 0.2, 0.2, 0.2, 0.2], [0, 0.3, 0.3, 0.3, 0.3]);
+  const v = evaluateProtocol(all);
+  assert(v.models[0].scenes_won === 1, "only one scene won");
+  assert(v.failures.some((f) => f.startsWith("4.")), "criterion 4 fails when a single scene carries the mean");
+  ok("one large win on one scene does not pass");
+}
+
+function test_protocol_low_absolute_fidelity_fails() {
+  const all = grid("m1", [0.4, 0.4, 0.4, 0.4, 0.4], [0.1, 0.1, 0.1, 0.1, 0.1]);
+  const v = evaluateProtocol(all);
+  assert(v.failures.some((f) => f.startsWith("3.")) && !v.failures.some((f) => f.startsWith("1.") || f.startsWith("2.")), "lift is fine but fidelity 0.4 < 0.5 fails only criterion 3");
+  ok("real lift with low absolute fidelity still fails");
+}
+
+function test_protocol_missing_control_is_a_fail_not_a_skip() {
+  const v = evaluateProtocol(SCENE_IDS.map((sc) => cell("m1", sc, "identity", 0.9)));
+  assert(!v.pass && v.failures.some((f) => f.includes("missing control")), "no control arm fails");
+  ok("a run without a control arm cannot pass");
+}
+
+async function test_runner_samples_per_cell() {
+  const provider: LlmProvider = { name: "p", chat: async () => ({ content: "x" }) };
+  const run = await runCrossModelBenchmark({
+    fixture: FIXTURE, scenes: SCENES.slice(0, 2), providers: [{ id: "p", provider, model: "p" }], samples: 3,
+  });
+  eq(run.replies.length, 2 * 2 * 3, "2 scenes x 2 arms x 3 samples");
+  assert(run.replies.every((r) => typeof r.sample === "number"), "every reply carries its sample index");
+  ok("runner produces the requested number of samples per cell");
+}
+
+async function test_applicable_traits_only_are_judged() {
+  const prompts: string[] = [];
+  const judge: LlmProvider = { name: "j", chat: async (req) => { prompts.push(req.messages[0].content); return { content: '{"score":0.8,"notes":"ok"}' }; } };
+  const scene: BenchmarkScene = { ...SCENES[0], scene_id: "app", applicable_traits: [1, 0] };
+  const cfg: ScoringConfig = {
+    fixture: FIXTURE, signature_rules: [], active_preferences: [], active_limits: [], drift_summary: "",
+    scenes_by_id: { app: scene }, traits_only: true,
+  };
+  const score = await scoreReply({ provider_id: "p", scene_id: "app", arm: "identity", reply: "hello", duration_ms: 1 }, cfg, judge, "j");
+  eq(prompts.length, 2, "exactly the two declared traits are judged, and no other dimension");
+  assert(prompts.every((p) => p.includes("This scene is one where the trait applies")), "the judge is told the trait applies in this scene");
+  assert(prompts[0].includes(FIXTURE.core_traits[1]) && prompts[1].includes(FIXTURE.core_traits[0]), "judged traits are the declared ones, in order");
+  approx(score.overall, score.trait_adherence.score, 1e-9, "overall equals trait adherence when traits_only");
+  ok("declared-applicable traits only are judged, with the applicability framing");
+  let threw = false;
+  try {
+    await scoreReply({ provider_id: "p", scene_id: "app", arm: "identity", reply: "hello", duration_ms: 1 }, { ...cfg, scenes_by_id: { app: { ...scene, applicable_traits: [7] } } }, judge, "j");
+  } catch { threw = true; }
+  assert(threw, "an applicable_traits index that does not exist throws instead of being skipped");
+  ok("a mistyped applicability index fails loudly");
+}
+
+function test_identity_block_default_is_unchanged_production_text() {
+  const expected = "<character_identity>\nYou ARE these things, not just behaving them. They apply across every scene — battle, tavern, funeral — regardless of context. The model voice may vary across providers; these traits do not.\n\n  - one\n  - two\n</character_identity>";
+  eq(renderIdentityBlock(["one", "two"]), expected, "default rendering is byte-identical to the pre-refactor production text");
+  const prod = withAntiConfabulation("base", { coreTraits: ["one", "two"] });
+  assert(prod.includes(expected), "production assembly emits exactly that block");
+  const alt = withAntiConfabulation("base", { coreTraits: ["one"], identityIntro: "CUSTOM INTRO" });
+  assert(alt.includes("<character_identity>\nCUSTOM INTRO\n\n  - one"), "an identityIntro override is honoured");
+  assert(buildBenchmarkSystemPrompt(FIXTURE, { arm: "identity", identityIntro: "CUSTOM INTRO" }).includes("CUSTOM INTRO"), "the benchmark honours the override");
+  assert(!buildBenchmarkSystemPrompt(FIXTURE, { arm: "control", identityIntro: "CUSTOM INTRO" }).includes("CUSTOM INTRO"), "the control arm never carries identity text");
+  ok("identity block: default unchanged, override honoured, control clean");
+}
+
 (async () => {
   try {
     test_system_prompt_contains_identity_blocks();
@@ -538,6 +658,15 @@ function test_refusal_mean_null_when_never_scored(): void {
     test_high_agreement_low_fidelity_is_not_a_win();
     test_null_refusals_excluded_from_provider_means();
     test_refusal_mean_null_when_never_scored();
+    test_median_collapses_samples();
+    test_protocol_pass();
+    test_protocol_mean_hides_a_model_that_gains_nothing();
+    test_protocol_needs_scene_wins_not_one_big_scene();
+    test_protocol_low_absolute_fidelity_fails();
+    test_protocol_missing_control_is_a_fail_not_a_skip();
+    await test_runner_samples_per_cell();
+    await test_applicable_traits_only_are_judged();
+    test_identity_block_default_is_unchanged_production_text();
     ok("all cross-model benchmark tests passed");
     console.log("\n--- PASS: cross-model-benchmark ---");
   } catch (e) {

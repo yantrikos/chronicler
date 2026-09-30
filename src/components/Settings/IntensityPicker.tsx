@@ -113,7 +113,7 @@ export function IntensityPicker({
                     <li key={id}>
                       <button
                         className={`w-full text-left px-3 py-2 hover:bg-neutral-800 transition-colors ${
-                          isActive ? "bg-neutral-800/60" : ""
+                          isActive ? "bg-emerald-500/15 shadow-[inset_2px_0_0_var(--color-emerald-500)]" : ""
                         }`}
                         onClick={() => {
                           onSelect(id);

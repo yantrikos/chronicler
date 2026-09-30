@@ -19,6 +19,7 @@ ENV NODE_ENV=production
 ENV CHRONICLER_PORT=3001
 ENV CHRONICLER_BIND=0.0.0.0
 ENV CHRONICLER_YANTRIKDB_URL=http://yantrikdb:8420/mcp
+ENV CHRONICLER_DATA_DIR=/data/store
 WORKDIR /app
 # git is required for the Grimoire install endpoint (clones plugin
 # repos into the volume-mounted plugins directory).
@@ -28,5 +29,6 @@ RUN npm install --omit=dev && npm cache clean --force
 COPY server ./server
 COPY --from=build /app/dist ./dist
 
+RUN mkdir -p /data/store
 EXPOSE 3001
 CMD ["node", "server/index.mjs"]

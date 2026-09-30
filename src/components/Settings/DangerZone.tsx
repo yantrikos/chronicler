@@ -138,7 +138,10 @@ export function DangerZone({ client, onWiped }: Props) {
                 Clears every localStorage key under <code>chronicler.*</code> —
                 persona, providers, sessions, MCP server registry, per-character
                 gating, intensity, identity notes. Plugin storage and YantrikDB
-                memories are not affected.
+                memories are not affected. If the Chronicler storage server is in
+                use, your chats are removed there too — otherwise they would come
+                back on the next reload. The server keeps a recoverable copy of
+                each removed item in its data folder.
               </p>
             </header>
             <div className="flex items-center gap-2">

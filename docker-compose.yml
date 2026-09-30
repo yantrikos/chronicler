@@ -61,7 +61,12 @@ services:
       # (containing grimoire.json + index.ts) into the host path on
       # the left and it gets picked up automatically with hot reload.
       CHRONICLER_PLUGINS_DIR: "/data/plugins"
+      # Durable storage for chats, characters and shared images (see
+      # server/storage.mjs). The browser keeps a working copy; this is the one
+      # that survives "clear site data".
+      CHRONICLER_DATA_DIR: "/data/store"
     volumes:
+      - chronicler-data:/data/store
       # Host plugin dir → container. Default $HOME/.chronicler/plugins.
       # Read-write so the in-app "Install" button can git-clone into it;
       # drop the trailing flag to make it read-only if you only ever
@@ -72,6 +77,7 @@ services:
 
 volumes:
   chronicler-memory:
+  chronicler-data:
 
 # ---
 # Exposing beyond localhost:

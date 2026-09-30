@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+  <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b3a8c"/><stop offset="0.55" stop-color="#e2733f"/><stop offset="1" stop-color="#f6c36a"/></linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b4a7a"/><stop offset="1" stop-color="#14243f"/></linearGradient>
+    <radialGradient id="lamp"><stop offset="0" stop-color="#fff6b0"/><stop offset="1" stop-color="#fff6b0" stop-opacity="0"/></radialGradient></defs>
+  <rect width="640" height="420" fill="url(#sky)"/>
+  <rect y="300" width="640" height="120" fill="url(#sea)"/>
+  <path d="M380 300 L420 300 L440 250 L360 250 Z" fill="#2a2a33"/>
+  <path d="M385 250 L415 250 L408 110 L392 110 Z" fill="#f2efe8"/>
+  <path d="M389 200 L411 200 L409 170 L391 170 Z" fill="#b8332c"/>
+  <path d="M386 240 L414 240 L412 215 L388 215 Z" fill="#b8332c"/>
+  <rect x="384" y="102" width="32" height="8" fill="#333"/>
+  <rect x="390" y="86" width="20" height="16" fill="#ffe680"/>
+  <circle cx="400" cy="94" r="46" fill="url(#lamp)"/>
+  <path d="M388 86 L400 70 L412 86 Z" fill="#333"/>
+  <g stroke="#1f1a2e" stroke-width="3" fill="none"><path d="M150 100 q10 -12 20 0 q10 -12 20 0"/><path d="M230 140 q8 -10 16 0 q8 -10 16 0"/><path d="M110 170 q7 -9 14 0 q7 -9 14 0"/></g>
+  <path d="M40 350 q30 -14 60 0" stroke="#0e1a30" stroke-width="3" fill="none"/>
+</svg>

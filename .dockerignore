@@ -11,3 +11,4 @@ tests
 scripts
 *.md
 !README.md
+data

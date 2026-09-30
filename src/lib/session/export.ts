@@ -36,7 +36,10 @@ export function exportSessionMarkdown(
       const name =
         t.role === "user" ? userName : charactersMap[t.speaker] ?? t.speaker;
       const header = `**${name}:**`;
-      return `${header}\n\n${t.content}\n`;
+      // A shared image is represented by the description that entered the
+      // story (the bytes are not exported).
+      const images = (t.attachments ?? []).map((a) => `> *[image: ${a.description}]*`).join("\n");
+      return `${header}\n\n${images ? `${images}\n\n` : ""}${t.content}\n`;
     })
     .join("\n---\n\n");
 

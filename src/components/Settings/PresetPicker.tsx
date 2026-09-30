@@ -69,7 +69,7 @@ export function PresetPicker({
       <button
         className={`text-[11px] rounded border px-2 py-1 flex items-center gap-1.5 transition-colors ${
           isCustom
-            ? "border-amber-700/60 text-amber-300 hover:border-amber-600"
+            ? "border-emerald-600/60 text-emerald-300 hover:border-emerald-500"
             : "border-neutral-800 text-neutral-300 hover:border-neutral-700 hover:text-neutral-100"
         }`}
         onClick={() => setOpen((v) => !v)}
@@ -95,7 +95,7 @@ export function PresetPicker({
                 <li key={p.id}>
                   <button
                     className={`w-full text-left px-3 py-2 hover:bg-neutral-800 transition-colors ${
-                      isActive ? "bg-neutral-800/60" : ""
+                      isActive ? "bg-emerald-500/15 shadow-[inset_2px_0_0_var(--color-emerald-500)]" : ""
                     }`}
                     onClick={() => {
                       onSelect(p.id);
@@ -126,11 +126,11 @@ export function PresetPicker({
           </ul>
           {isCustom && (
             <div className="border-t border-neutral-800 px-3 py-2 flex items-center justify-between">
-              <span className="text-[11px] text-amber-400">
+              <span className="text-[11px] text-emerald-400">
                 You've edited sampling manually.
               </span>
               <button
-                className="text-[11px] px-2 py-0.5 rounded bg-amber-700/60 hover:bg-amber-700 text-amber-50"
+                className="text-[11px] px-2 py-0.5 rounded bg-emerald-700/70 hover:bg-emerald-600 text-emerald-50"
                 onClick={() => {
                   onReapply();
                   setOpen(false);

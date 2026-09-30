@@ -1,0 +1,343 @@
+/* Chronicler themes.
+ *
+ * The whole UI is written against Tailwind's `neutral-*` (surfaces, text,
+ * borders) and `emerald-*` (the accent) palettes. Tailwind 4 compiles those
+ * utilities to `var(--color-neutral-N)` / `var(--color-emerald-N)`, so
+ * re-pointing the variables re-themes every component without touching
+ * them. A theme is therefore just a handful of parameters:
+ *
+ *   --n-h / --n-c   hue + chroma of the surface tint (OKLCH)
+ *   --a-h / --a-c   hue + chroma of the accent
+ *   --glow-1/2/3    ambient colour washes painted behind the app
+ *
+ * plus a data-mode ("dark" | "light") which flips the lightness ladder so
+ * `text-neutral-100` is near-white on dark themes and near-black on light.
+ * To add a theme: add a [data-theme="id"] block here and an entry in
+ * src/lib/ui/theme.ts.
+ */
+
+/* ---- lightness ladders ------------------------------------------------- */
+
+:root,
+:root[data-mode="dark"] {
+  --l-50: 0.985;
+  --l-100: 0.965;
+  --l-200: 0.9;
+  --l-300: 0.82;
+  --l-400: 0.68;
+  --l-500: 0.54;
+  --l-600: 0.42;
+  --l-700: 0.33;
+  --l-800: 0.265;
+  --l-900: 0.215;
+  --l-950: 0.16;
+  color-scheme: dark;
+}
+
+/* Inverted: 950 is the page, 50 is the ink. */
+:root[data-mode="light"] {
+  --l-50: 0.17;
+  --l-100: 0.22;
+  --l-200: 0.3;
+  --l-300: 0.4;
+  --l-400: 0.5;
+  --l-500: 0.62;
+  --l-600: 0.8;
+  --l-700: 0.87;
+  --l-800: 0.925;
+  --l-900: 0.955;
+  --l-950: 0.978;
+  color-scheme: light;
+}
+
+/* ---- the ramps --------------------------------------------------------- */
+
+:root {
+  --color-neutral-50: oklch(var(--l-50) calc(var(--n-c) * 0.3) var(--n-h));
+  --color-neutral-100: oklch(var(--l-100) calc(var(--n-c) * 0.4) var(--n-h));
+  --color-neutral-200: oklch(var(--l-200) calc(var(--n-c) * 0.5) var(--n-h));
+  --color-neutral-300: oklch(var(--l-300) calc(var(--n-c) * 0.6) var(--n-h));
+  --color-neutral-400: oklch(var(--l-400) calc(var(--n-c) * 0.75) var(--n-h));
+  --color-neutral-500: oklch(var(--l-500) calc(var(--n-c) * 0.9) var(--n-h));
+  --color-neutral-600: oklch(var(--l-600) var(--n-c) var(--n-h));
+  --color-neutral-700: oklch(var(--l-700) var(--n-c) var(--n-h));
+  --color-neutral-800: oklch(var(--l-800) var(--n-c) var(--n-h));
+  --color-neutral-900: oklch(var(--l-900) var(--n-c) var(--n-h));
+  --color-neutral-950: oklch(var(--l-950) var(--n-c) var(--n-h));
+
+  /* Accent. Fills (500-700) and on-fill text (50/100) are the same in every
+   * mode; the text shades (200-400) and dark tints (800-950) are re-pointed
+   * for light mode below. */
+  --color-emerald-50: oklch(0.985 calc(var(--a-c) * 0.08) var(--a-h));
+  --color-emerald-100: oklch(0.955 calc(var(--a-c) * 0.2) var(--a-h));
+  --color-emerald-200: var(--a-200, oklch(0.9 calc(var(--a-c) * 0.4) var(--a-h)));
+  --color-emerald-300: var(--a-300, oklch(0.84 calc(var(--a-c) * 0.65) var(--a-h)));
+  --color-emerald-400: var(--a-400, oklch(0.77 calc(var(--a-c) * 0.9) var(--a-h)));
+  --color-emerald-500: oklch(0.7 var(--a-c) var(--a-h));
+  --color-emerald-600: oklch(0.61 calc(var(--a-c) * 0.97) var(--a-h));
+  --color-emerald-700: oklch(0.52 calc(var(--a-c) * 0.82) var(--a-h));
+  --color-emerald-800: var(--a-800, oklch(0.44 calc(var(--a-c) * 0.66) var(--a-h)));
+  --color-emerald-900: var(--a-900, oklch(0.36 calc(var(--a-c) * 0.5) var(--a-h)));
+  --color-emerald-950: var(--a-950, oklch(0.27 calc(var(--a-c) * 0.36) var(--a-h)));
+}
+
+:root[data-mode="light"] {
+  --a-200: oklch(0.42 calc(var(--a-c) * 0.85) var(--a-h));
+  --a-300: oklch(0.47 calc(var(--a-c) * 0.9) var(--a-h));
+  --a-400: oklch(0.52 var(--a-c) var(--a-h));
+  --a-800: oklch(0.9 calc(var(--a-c) * 0.28) var(--a-h));
+  --a-900: oklch(0.93 calc(var(--a-c) * 0.2) var(--a-h));
+  --a-950: oklch(0.96 calc(var(--a-c) * 0.12) var(--a-h));
+}
+
+/* ---- themes ------------------------------------------------------------ */
+
+/* Aurora — default. Ink-blue surfaces, violet accent, cool aurora washes. */
+:root,
+:root[data-theme="aurora"] {
+  --n-h: 282;
+  --n-c: 0.058;
+  --a-h: 292;
+  --a-c: 0.23;
+  --r: 1.25;
+  --font-prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --glow-1: oklch(0.52 0.26 292 / 0.5);
+  --glow-2: oklch(0.62 0.17 215 / 0.32);
+  --glow-3: oklch(0.58 0.23 340 / 0.24);
+}
+
+/* Ember — warm charcoal, amber-orange accent, firelight washes. */
+:root[data-theme="ember"] {
+  --n-h: 42;
+  --n-c: 0.045;
+  --a-h: 48;
+  --a-c: 0.2;
+  --r: 1;
+  --font-prose: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --glow-1: oklch(0.56 0.2 42 / 0.42);
+  --glow-2: oklch(0.5 0.18 18 / 0.28);
+  --glow-3: oklch(0.62 0.15 85 / 0.2);
+}
+
+/* Abyss — OLED near-black, teal accent. */
+:root[data-theme="abyss"] {
+  --l-800: 0.2;
+  --l-900: 0.14;
+  --l-950: 0.085;
+  --n-h: 205;
+  --n-c: 0.034;
+  --a-h: 185;
+  --a-c: 0.15;
+  --r: 0.7;
+  --font-prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --glow-1: oklch(0.52 0.14 192 / 0.32);
+  --glow-2: oklch(0.45 0.13 250 / 0.22);
+  --glow-3: transparent;
+}
+
+/* Verdant — deep forest, emerald accent. */
+:root[data-theme="verdant"] {
+  --n-h: 158;
+  --n-c: 0.045;
+  --a-h: 152;
+  --a-c: 0.18;
+  --r: 1;
+  --font-prose: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --glow-1: oklch(0.5 0.16 155 / 0.4);
+  --glow-2: oklch(0.55 0.14 108 / 0.24);
+  --glow-3: transparent;
+}
+
+/* Classic — the original flat neutral + emerald look. */
+:root[data-theme="classic"] {
+  --n-h: 285;
+  --n-c: 0;
+  --a-h: 162;
+  --a-c: 0.17;
+  --r: 0.85;
+  --font-prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --glow-1: transparent;
+  --glow-2: transparent;
+  --glow-3: transparent;
+}
+
+/* Parchment — warm paper, terracotta accent. Made for long reading. */
+:root[data-theme="parchment"] {
+  --n-h: 76;
+  --n-c: 0.045;
+  --a-h: 42;
+  --a-c: 0.15;
+  --r: 1.1;
+  --font-prose: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --glow-1: oklch(0.86 0.11 68 / 0.45);
+  --glow-2: oklch(0.86 0.09 28 / 0.28);
+  --glow-3: transparent;
+}
+
+/* Daylight — clean cool white, blue accent. */
+:root[data-theme="daylight"] {
+  --n-h: 255;
+  --n-c: 0.022;
+  --a-h: 262;
+  --a-c: 0.19;
+  --r: 1;
+  --font-prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --glow-1: oklch(0.86 0.1 250 / 0.4);
+  --glow-2: oklch(0.88 0.08 300 / 0.26);
+  --glow-3: transparent;
+}
+
+/* ---- light mode: semantic palettes ------------------------------------- */
+/* Only the accent is theme-driven; amber/rose/red/etc. keep their meaning.
+ * On light themes their text shades (200-400) are darkened for contrast and
+ * their dark tints (800-950) lightened, mirroring the accent handling. */
+:root[data-mode="light"] {
+  --color-amber-200: oklch(0.42 0.15 75);
+  --color-amber-300: oklch(0.47 0.15 75);
+  --color-amber-400: oklch(0.52 0.15 75);
+  --color-amber-800: oklch(0.9 0.045 75);
+  --color-amber-900: oklch(0.93 0.033 75);
+  --color-amber-950: oklch(0.96 0.019 75);
+  --color-rose-200: oklch(0.42 0.15 15);
+  --color-rose-300: oklch(0.47 0.15 15);
+  --color-rose-400: oklch(0.52 0.15 15);
+  --color-rose-800: oklch(0.9 0.045 15);
+  --color-rose-900: oklch(0.93 0.033 15);
+  --color-rose-950: oklch(0.96 0.019 15);
+  --color-red-200: oklch(0.42 0.15 25);
+  --color-red-300: oklch(0.47 0.15 25);
+  --color-red-400: oklch(0.52 0.15 25);
+  --color-red-800: oklch(0.9 0.045 25);
+  --color-red-900: oklch(0.93 0.033 25);
+  --color-red-950: oklch(0.96 0.019 25);
+  --color-sky-200: oklch(0.42 0.15 235);
+  --color-sky-300: oklch(0.47 0.15 235);
+  --color-sky-400: oklch(0.52 0.15 235);
+  --color-sky-800: oklch(0.9 0.045 235);
+  --color-sky-900: oklch(0.93 0.033 235);
+  --color-sky-950: oklch(0.96 0.019 235);
+  --color-violet-200: oklch(0.42 0.15 295);
+  --color-violet-300: oklch(0.47 0.15 295);
+  --color-violet-400: oklch(0.52 0.15 295);
+  --color-violet-800: oklch(0.9 0.045 295);
+  --color-violet-900: oklch(0.93 0.033 295);
+  --color-violet-950: oklch(0.96 0.019 295);
+  --color-fuchsia-200: oklch(0.42 0.15 325);
+  --color-fuchsia-300: oklch(0.47 0.15 325);
+  --color-fuchsia-400: oklch(0.52 0.15 325);
+  --color-fuchsia-800: oklch(0.9 0.045 325);
+  --color-fuchsia-900: oklch(0.93 0.033 325);
+  --color-fuchsia-950: oklch(0.96 0.019 325);
+  --color-teal-200: oklch(0.42 0.15 185);
+  --color-teal-300: oklch(0.47 0.15 185);
+  --color-teal-400: oklch(0.52 0.15 185);
+  --color-teal-800: oklch(0.9 0.045 185);
+  --color-teal-900: oklch(0.93 0.033 185);
+  --color-teal-950: oklch(0.96 0.019 185);
+  --color-slate-200: oklch(0.42 0.02 255);
+  --color-slate-300: oklch(0.47 0.02 255);
+  --color-slate-400: oklch(0.52 0.02 255);
+  --color-slate-800: oklch(0.9 0.006 255);
+  --color-slate-900: oklch(0.93 0.004 255);
+  --color-slate-950: oklch(0.96 0.003 255);
+}
+
+/* ---- atmosphere -------------------------------------------------------- */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  color: var(--color-neutral-100);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-color: var(--color-neutral-950);
+  background-image:
+    radial-gradient(1100px 620px at 8% -8%, var(--glow-1), transparent 62%),
+    radial-gradient(900px 520px at 104% 4%, var(--glow-2), transparent 58%),
+    radial-gradient(800px 480px at 50% 112%, var(--glow-3), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-emerald-500) 40%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-emerald-400) 80%, transparent);
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-700) transparent;
+}
+
+/* Colour changes ease instead of snapping — also makes switching themes feel
+ * deliberate. Kept to colour properties so layout/animation is unaffected. */
+button,
+input,
+textarea,
+select,
+[class*="bg-"],
+[class*="border-"] {
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+/* ---- selection states -------------------------------------------------- */
+/* Hover, focus and selection follow the accent so a theme reads as one
+ * colour story rather than a recoloured background. Unlayered on purpose:
+ * it must beat Tailwind's layered hover:bg-neutral-* utilities. */
+
+:root {
+  accent-color: var(--color-emerald-500); /* checkboxes, radios, sliders */
+}
+
+[class*="hover:bg-neutral-"]:hover:not(:disabled) {
+  background-color: color-mix(in oklab, var(--color-emerald-500) 16%, var(--color-neutral-900));
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-emerald-500);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-emerald-500) 22%, transparent);
+}
+
+[aria-selected="true"],
+[aria-current="true"],
+[aria-pressed="true"] {
+  background-color: color-mix(in oklab, var(--color-emerald-500) 18%, transparent);
+}
+
+/* ---- shape + voice ------------------------------------------------------ */
+/* Each theme scales corner radius (--r) and picks the face message text is
+ * set in (--font-prose), so themes differ in feel — not just in colour. */
+
+:root {
+  --radius-sm: calc(0.25rem * var(--r, 1));
+  --radius-md: calc(0.375rem * var(--r, 1));
+  --radius-lg: calc(0.5rem * var(--r, 1));
+  --radius-xl: calc(0.75rem * var(--r, 1));
+  --radius-2xl: calc(1rem * var(--r, 1));
+  --radius-3xl: calc(1.5rem * var(--r, 1));
+}
+
+.msg-text {
+  font-family: var(--font-prose, inherit);
+}

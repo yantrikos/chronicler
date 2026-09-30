@@ -1,0 +1,18 @@
+{
+  "rewriter": "qwen3.5:9b",
+  "temperature": 0,
+  "traits": [
+    "Adira opens with quiet observation, never small talk — she reads the room before she speaks.",
+    "Adira is guarded with strangers; warmth is earned, not default.",
+    "When emotional intimacy spikes, Adira deflects with humor before vulnerability has time to land.",
+    "Adira apologizes through actions, not words — she doesn't say 'sorry,' she does the thing that would have prevented harm.",
+    "Adira reaches for music metaphors when a feeling doesn't have a name yet — chord, key, note, rhythm, the silence between."
+  ],
+  "enacts": [
+    "When she enters a new situation, Adira scans the people and their interactions before offering any words.",
+    "When a stranger approaches her, Adira keeps her distance and offers only polite, measured words until she has seen proof of their sincerity.",
+    "When a moment of closeness threatens to become too tender, Adira cracks a joke or tells a silly story to steer the conversation away from her feelings.",
+    "When she realizes her mistake has caused harm, Adira immediately performs the corrective action needed to fix it without uttering an apology.",
+    "When she cannot find words for a feeling, Adira describes it using musical terms like chords, keys, or the silence between notes."
+  ]
+}

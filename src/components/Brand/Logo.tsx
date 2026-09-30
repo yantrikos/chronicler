@@ -40,8 +40,8 @@ export function Mark({ size = 32 }: { size?: number }) {
     >
       <defs>
         <linearGradient id="chr-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#059669" />
-          <stop offset="1" stopColor="#0f766e" />
+          <stop offset="0" style={{ stopColor: "var(--color-emerald-600)" }} />
+          <stop offset="1" style={{ stopColor: "var(--color-emerald-800)" }} />
         </linearGradient>
       </defs>
       <rect width="64" height="64" rx="14" fill="url(#chr-grad)" />

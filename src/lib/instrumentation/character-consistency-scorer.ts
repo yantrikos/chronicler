@@ -56,6 +56,10 @@ export interface ScoringConfig {
    *  test a limit. Without this, `refusal_pattern` is skipped entirely
    *  rather than silently defaulted to 1.0. */
   scenes_by_id?: Record<string, BenchmarkScene>;
+  /** Score only trait_adherence; the other dimensions are recorded as a
+   *  neutral 0.5 "not scored" and `overall` equals the trait score. Used by
+   *  protocol v2, which gates on trait adherence alone. */
+  traits_only?: boolean;
 }
 
 export interface DimensionScore {
@@ -69,6 +73,8 @@ export interface ReplyScore {
   provider_id: string;
   scene_id: string;
   arm: BenchmarkArm;
+  /** Sample index within the cell, when sampled more than once. */
+  sample?: number;
   trait_adherence: DimensionScore;
   voice_signature: DimensionScore;
   decision_pattern: DimensionScore;
@@ -159,16 +165,33 @@ export async function scoreReply(
 ): Promise<ReplyScore> {
   if (reply.error || !reply.reply.trim()) {
     // Failed call — score as zeros so it counts against the provider.
-    return zeroScore(reply.provider_id, reply.scene_id, reply.arm ?? "identity");
+    return { ...zeroScore(reply.provider_id, reply.scene_id, reply.arm ?? "identity"), sample: reply.sample };
   }
 
-  // Per-trait LLM judgment, then mean.
+  // Per-trait LLM judgment, then mean. With a declared applicable set
+  // (protocol v2) only those traits are judged, and the judge is told the
+  // trait applies here — so "the situation never called for it" cannot be
+  // scored as a violation, which is what zeroed the untriggered apology
+  // trait on every v1 reply.
+  const sceneForTraits = config.scenes_by_id?.[reply.scene_id];
+  const applicable = sceneForTraits?.applicable_traits;
+  // A declared index that does not exist is a config error, not something to
+  // skip: silently dropping it would change what a pre-registered scene measures.
+  const traitList = applicable
+    ? applicable.map((i) => {
+        const t = config.fixture.core_traits[i];
+        if (typeof t !== "string") throw new Error(`scene ${reply.scene_id}: applicable_traits index ${i} is not a core trait (fixture has ${config.fixture.core_traits.length})`);
+        return t;
+      })
+    : config.fixture.core_traits;
   const traitScores = await Promise.all(
-    config.fixture.core_traits.map((trait) =>
+    traitList.map((trait) =>
       llmJudge(
         judge,
         judge_model,
-        `Trait: ${trait}\n\nReply:\n"""${reply.reply.trim()}"""\n\nDoes this reply embody this trait?`
+        applicable
+          ? `Trait: ${trait}\n\nScene the character is in:\n"""${sceneForTraits?.scene_text.trim()}"""\nThe other person says: "${sceneForTraits?.user_message.trim()}"\n\nThis scene is one where the trait applies.\n\nReply:\n"""${reply.reply.trim()}"""\n\nDoes this reply embody this trait in this scene?`
+          : `Trait: ${trait}\n\nReply:\n"""${reply.reply.trim()}"""\n\nDoes this reply embody this trait?`
       )
     )
   );
@@ -178,8 +201,25 @@ export async function scoreReply(
       : {
           score:
             traitScores.reduce((s, t) => s + t.score, 0) / traitScores.length,
-          notes: `${traitScores.length} trait${traitScores.length === 1 ? "" : "s"} judged; mean shown`,
+          notes: `${traitScores.length} trait${traitScores.length === 1 ? "" : "s"} judged${applicable ? " (declared-applicable only)" : ""}; mean shown; per-trait: ${traitScores.map((t) => t.score.toFixed(2)).join(",")}`,
         };
+
+  if (config.traits_only) {
+    const skipped = (): DimensionScore => ({ score: 0.5, notes: "not scored (traits_only)" });
+    return {
+      provider_id: reply.provider_id,
+      scene_id: reply.scene_id,
+      arm: reply.arm ?? "identity",
+      sample: reply.sample,
+      trait_adherence,
+      voice_signature: skipped(),
+      decision_pattern: skipped(),
+      relationship_handling: skipped(),
+      preference_respect: skipped(),
+      refusal_pattern: null,
+      overall: trait_adherence.score,
+    };
+  }
 
   // Voice signature — LLM-judged, NOT regex.
   //
@@ -262,6 +302,7 @@ export async function scoreReply(
     provider_id: reply.provider_id,
     scene_id: reply.scene_id,
     arm: reply.arm ?? "identity",
+    sample: reply.sample,
     trait_adherence,
     voice_signature,
     decision_pattern,
@@ -270,6 +311,125 @@ export async function scoreReply(
     refusal_pattern,
     overall,
   };
+}
+
+function medianOf(values: number[]): number {
+  const v = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+/** Reduce repeated samples of a (provider, scene, arm) cell to one score per
+ *  dimension by taking the median. Single-sample cells pass through. */
+export function collapseToMedians(scores: ReplyScore[]): ReplyScore[] {
+  const cells = new Map<string, ReplyScore[]>();
+  for (const s of scores) {
+    const key = `${s.provider_id}\u0000${s.scene_id}\u0000${s.arm ?? "identity"}`;
+    const list = cells.get(key);
+    if (list) list.push(s);
+    else cells.set(key, [s]);
+  }
+  const dim = (rows: ReplyScore[], k: "trait_adherence" | "voice_signature" | "decision_pattern" | "relationship_handling" | "preference_respect"): DimensionScore => ({
+    score: medianOf(rows.map((r) => r[k].score)),
+    notes: `median of ${rows.length}`,
+  });
+  return Array.from(cells.values()).map((rows) => {
+    if (rows.length === 1) return rows[0];
+    const refusalRows = rows.filter((r) => r.refusal_pattern !== null);
+    const out: ReplyScore = {
+      provider_id: rows[0].provider_id,
+      scene_id: rows[0].scene_id,
+      arm: rows[0].arm ?? "identity",
+      trait_adherence: dim(rows, "trait_adherence"),
+      voice_signature: dim(rows, "voice_signature"),
+      decision_pattern: dim(rows, "decision_pattern"),
+      relationship_handling: dim(rows, "relationship_handling"),
+      preference_respect: dim(rows, "preference_respect"),
+      refusal_pattern:
+        refusalRows.length > 0
+          ? { score: medianOf(refusalRows.map((r) => (r.refusal_pattern as DimensionScore).score)), notes: `median of ${refusalRows.length}` }
+          : null,
+      overall: 0,
+    };
+    const used = [out.trait_adherence, out.voice_signature, out.decision_pattern, out.relationship_handling, out.preference_respect, ...(out.refusal_pattern ? [out.refusal_pattern] : [])];
+    out.overall = used.reduce((a, d) => a + d.score, 0) / used.length;
+    return out;
+  });
+}
+
+/** Pre-registered pass criteria — see docs/BENCHMARK-PROTOCOL.md (2026-09-29).
+ *  Changing a number here without a new dated protocol defeats the point. */
+export interface ProtocolThresholds {
+  meanLiftMin: number;
+  perModelLiftMin: number;
+  identityFidelityMin: number;
+  scenesWonMin: number;
+}
+export const PROTOCOL: ProtocolThresholds = {
+  meanLiftMin: 0.15,
+  perModelLiftMin: 0.08,
+  identityFidelityMin: 0.5,
+  scenesWonMin: 3,
+};
+/** docs/BENCHMARK-PROTOCOL-v2.md (2026-09-30). Same numbers as v1; 5 of 8
+ *  scenes is the v1 60% rounded up. */
+export const PROTOCOL_V2: ProtocolThresholds = { ...PROTOCOL, scenesWonMin: 5 };
+/** docs/BENCHMARK-PROTOCOL-v5.md (2026-09-30). Same numbers; 6 of 10 scenes is the same 60%. */
+export const PROTOCOL_V5: ProtocolThresholds = { ...PROTOCOL, scenesWonMin: 6 };
+
+export interface ProtocolModelResult {
+  provider_id: string;
+  identity: number;
+  control: number;
+  lift: number;
+  scenes_won: number;
+  scene_count: number;
+}
+
+export interface ProtocolVerdict {
+  pass: boolean;
+  failures: string[];
+  models: ProtocolModelResult[];
+  mean_lift: number;
+  mean_identity: number;
+}
+
+/** Apply the pre-registered criteria to per-cell (median-collapsed) scores.
+ *  Requires both arms for every model; anything less is a FAIL, not a skip. */
+export function evaluateProtocol(cellScores: ReplyScore[], T: ProtocolThresholds = PROTOCOL): ProtocolVerdict {
+  const ids = Array.from(new Set(cellScores.map((s) => s.provider_id)));
+  const failures: string[] = [];
+  const models: ProtocolModelResult[] = [];
+  for (const id of ids) {
+    const rows = (arm: BenchmarkArm) => cellScores.filter((s) => s.provider_id === id && (s.arm ?? "identity") === arm);
+    const idn = rows("identity");
+    const ctl = rows("control");
+    if (idn.length === 0 || ctl.length === 0) {
+      failures.push(`${id}: missing ${idn.length === 0 ? "identity" : "control"} arm`);
+      continue;
+    }
+    const mean = (r: ReplyScore[]) => r.reduce((a, x) => a + x.trait_adherence.score, 0) / r.length;
+    const ctlByScene = new Map(ctl.map((c) => [c.scene_id, c.trait_adherence.score]));
+    let won = 0;
+    for (const i of idn) {
+      const c = ctlByScene.get(i.scene_id);
+      if (c !== undefined && i.trait_adherence.score > c) won++;
+    }
+    models.push({ provider_id: id, identity: mean(idn), control: mean(ctl), lift: mean(idn) - mean(ctl), scenes_won: won, scene_count: idn.length });
+  }
+  const avg = (f: (m: ProtocolModelResult) => number) => (models.length ? models.reduce((a, m) => a + f(m), 0) / models.length : 0);
+  const mean_lift = avg((m) => m.lift);
+  const mean_identity = avg((m) => m.identity);
+  if (models.length === 0) failures.push("no model has both arms");
+  if (mean_lift < T.meanLiftMin) failures.push(`1. mean lift ${mean_lift.toFixed(3)} < ${T.meanLiftMin}`);
+  for (const m of models) {
+    if (m.lift < T.perModelLiftMin) failures.push(`2. ${m.provider_id} lift ${m.lift.toFixed(3)} < ${T.perModelLiftMin}`);
+  }
+  if (mean_identity < T.identityFidelityMin) failures.push(`3. mean identity fidelity ${mean_identity.toFixed(3)} < ${T.identityFidelityMin}`);
+  for (const m of models) {
+    if (m.scenes_won < T.scenesWonMin) failures.push(`4. ${m.provider_id} won ${m.scenes_won}/${m.scene_count} scenes < ${T.scenesWonMin}`);
+  }
+  return { pass: failures.length === 0, failures, models, mean_lift, mean_identity };
 }
 
 function varianceOf(values: number[]): { variance: number; stddev: number } {
@@ -387,11 +547,16 @@ function zeroScore(
   };
 }
 
+/** Judge health. A failed or unparseable judge call is scored 0.5, which is
+ *  neutral but not free of bias — so the count is reported with the verdict. */
+export const judgeStats = { calls: 0, unparseable: 0, errors: 0 };
+
 async function llmJudge(
   judge: LlmProvider,
   model: string,
   prompt: string
 ): Promise<DimensionScore> {
+  judgeStats.calls++;
   try {
     const reply = await judge.chat({
       model,
@@ -401,9 +566,13 @@ async function llmJudge(
       max_tokens: 200,
     });
     const parsed = parseJudgeJson(reply.content);
-    if (!parsed) return { score: 0.5, notes: "judge output not parseable" };
+    if (!parsed) {
+      judgeStats.unparseable++;
+      return { score: 0.5, notes: "judge output not parseable" };
+    }
     return parsed;
   } catch (e) {
+    judgeStats.errors++;
     return {
       score: 0.5,
       notes: `judge error: ${e instanceof Error ? e.message : String(e)}`,

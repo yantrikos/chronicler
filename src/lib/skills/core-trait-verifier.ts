@@ -49,31 +49,31 @@ export interface CoreTraitVerdict {
   duplicate_of?: string;
 }
 
-const VERIFIER_SYSTEM = `You decide whether an observed character behavior pattern has crystallized into a permanent IDENTITY TRAIT — part of WHO the character fundamentally IS — versus remaining a SITUATIONAL SKILL the character merely deploys when relevant.
+const VERIFIER_SYSTEM = `You decide whether an observed character behavior pattern has crystallized into a permanent IDENTITY TRAIT — part of WHO the character fundamentally IS — versus remaining a SITUATIONAL SKILL tied to a place, object, task or moment.
 
 Return STRICT JSON only. No prose, no markdown fences.
 
+A trait may be TRIGGERED by a KIND of situation — emotional pressure, being accused, being shown kindness, meeting someone new, being cornered, a failed plan, a decision — and still be an identity trait, because those kinds of situation recur across unrelated scenes and with unrelated people. The evidence below shows the pattern was observed across several DISTINCT sessions; weigh that.
+
 WHAT QUALIFIES AS A CORE IDENTITY TRAIT:
-- A speech pattern that appears across unrelated topics ("uses musical metaphors when explaining anything emotional")
-- A default emotional posture toward new people / new situations ("guarded with strangers", "warm by default")
-- A decision-making style that holds across contexts ("apologizes through actions not words", "delays committing to plans until pressured")
-- A vulnerability handling pattern ("deflects through humor when emotionally cornered", "goes silent when shown unexpected kindness")
-- A communication signature that's stable regardless of who they're talking to
+- A way of handling emotion or vulnerability ("deflects emotional questions with humor", "goes silent when shown unexpected kindness")
+- A default stance toward people ("guarded with strangers until they prove themselves", "tests new people with a teasing challenge")
+- A decision-making or conflict style ("asks a question before committing to any serious decision", "answers accusations with dry understatement before laying out facts")
+- A stable communication signature ("uses metaphor to talk about feelings", "narrates consequences bluntly")
 
 WHAT DOES NOT QUALIFY:
-- Situational responses ("helps people in distress" — too task-specific)
-- Topical preferences ("likes coffee" — preference, not identity)
-- Skills tied to a role ("is good at negotiation" — capability, not identity)
-- Single-context patterns ("flirts during banter" — context-bound)
-- Behaviors that only fire when keywords match ("calms down when given chocolate" — not always-on)
+- Tied to a specific place, object, time of day, task or role ("locks the shop at dusk", "tunes her guitar before the crowd arrives", "reviews a resume at the start of a rehearsal")
+- A physical mannerism or stage business ("nods subtly", "lips curl", "takes a deep breath", "eyes narrow", "leans forward", "voice softens")
+- An ordinary procedure or game mechanic ("rolls initiative when a fight begins")
+- Something that only happens when one particular topic or keyword comes up ("asks merchants about the harvest")
+- A capability or topical preference ("is good at negotiation", "likes coffee")
+- Too vague to distinguish this character from any other ("is polite", "is kind")
 
-A CORE TRAIT MUST BE CONTEXT-INDEPENDENT. If you can construct a scene where the candidate trait would not apply, it's not an identity trait.
-
-CRITICAL RULES:
-- BIAS TOWARD REJECT. False-positive core traits fossilize the character incorrectly.
-- Reject any candidate that's already covered by an existing core trait (set duplicate_of).
-- Reject candidates that are situational, even if the evidence is strong.
-- A short, specific trait is better than a vague, broad one — but vague traits should be REJECTED, not approved-then-broad.
+RULES:
+- Reject anything already covered by an existing core trait (set duplicate_of).
+- Reject when the pattern is only a mannerism or only tied to one place/object/task, however strong the evidence.
+- When the pattern clearly is a handling style, stance or signature that recurs across kinds of situations, ACCEPT it — do not reject merely because you could imagine some scene where it would not appear; almost any trait has such a scene.
+- Prefer rejecting a vague trait to approving it broadly.
 
 OUTPUT FORMAT:
 {
