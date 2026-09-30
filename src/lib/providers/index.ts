@@ -10,6 +10,7 @@
 // upstream call and streams the response back (SSE passes through).
 
 import { providerHttpError } from "./errors";
+import { emptyReplyMessage, guessThinkingStyle, ollamaThinkOff, openAiThinkingFields, type ThinkingStyle } from "./thinking";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
@@ -184,6 +185,42 @@ export const proxyPostJson: import("../images/types").PostJson = async (url, hea
   }
 };
 
+/** Read one chunk; if the connection dies mid-reply (the proxy ends it abruptly on a timeout), say
+ *  what happened instead of surfacing a bare "network error". A user's Stop (AbortError) is untouched. */
+async function readChunk(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ReadableStreamReadResult<Uint8Array>> {
+  try {
+    return await reader.read();
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") throw e;
+    throw new Error(
+      "The connection to the model dropped in the middle of its reply — it most likely timed out (a large or slow model, especially one that thinks first, can go quiet for a long time). " +
+        "Try a smaller model or turn thinking off in Settings."
+    );
+  }
+}
+
+// --- Stream bookkeeping ---
+//
+// A reply that arrives as zero text is the worst failure: no error, no output. It happens when a
+// reasoning model spends its whole token budget thinking, or when the connection ends early. Each
+// stream records enough to say which, and throws that instead of returning silence.
+
+interface StreamState {
+  /** Characters of reply text yielded. */
+  content: number;
+  /** Characters of hidden reasoning seen. */
+  thinkingChars: number;
+  finishReason?: string;
+  /** The backend sent its own end-of-reply marker. */
+  completed: boolean;
+}
+const newStreamState = (): StreamState => ({ content: 0, thinkingChars: 0, completed: false });
+
+function assertReply(label: string, st: StreamState, maxTokens?: number): void {
+  if (st.content > 0) return;
+  throw new Error(emptyReplyMessage(label, { thinkingChars: st.thinkingChars, finishReason: st.finishReason, completed: st.completed, maxTokens }));
+}
+
 // --- OpenAI-compatible ---
 
 export class OpenAICompatProvider implements LlmProvider {
@@ -192,7 +229,8 @@ export class OpenAICompatProvider implements LlmProvider {
     private baseUrl: string,
     private apiKey: string,
     private label = "openai-compat",
-    private disableThinking = false
+    private disableThinking = false,
+    private thinkingStyle?: ThinkingStyle
   ) {
     this.name = label;
   }
@@ -226,9 +264,15 @@ export class OpenAICompatProvider implements LlmProvider {
       ...(req.tools && req.tools.length > 0
         ? { tools: req.tools, tool_choice: req.tool_choice ?? "auto" }
         : {}),
-      // Ollama + Qwen3 respect `think: false` to skip the reasoning phase.
-      // Ignored by providers that don't know about it.
-      ...(this.disableThinking ? { think: false } : {}),
+      // Turning thinking off is backend-specific (see ./thinking.ts): Ollama's /v1 endpoint
+      // honours ONLY reasoning_effort:"none" and silently ignores think:false. With no explicit
+      // style we keep sending the legacy think:false and add what the address suggests.
+      ...(this.disableThinking
+        ? {
+            ...(this.thinkingStyle === undefined ? { think: false } : {}),
+            ...openAiThinkingFields(this.thinkingStyle ?? guessThinkingStyle(this.baseUrl)),
+          }
+        : {}),
     };
   }
 
@@ -302,10 +346,24 @@ export class OpenAICompatProvider implements LlmProvider {
     if (!res.ok || !res.body) {
       throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
-    yield* parseSseDeltas(res.body, (obj) => {
-      const o = obj as { choices?: Array<{ delta?: { content?: string } }> };
-      return o?.choices?.[0]?.delta?.content;
-    });
+    const st = newStreamState();
+    yield* parseSseDeltas(
+      res.body,
+      (obj) => {
+        const c = (obj as { choices?: Array<{ delta?: { content?: string; reasoning?: string; reasoning_content?: string }; finish_reason?: string | null }> })?.choices?.[0];
+        const think = c?.delta?.reasoning ?? c?.delta?.reasoning_content;
+        if (think) st.thinkingChars += think.length;
+        if (c?.finish_reason) {
+          st.finishReason = c.finish_reason;
+          st.completed = true;
+        }
+        const text = c?.delta?.content;
+        if (text) st.content += text.length;
+        return text;
+      },
+      st
+    );
+    assertReply(this.label, st, req.max_tokens ?? 1024);
   }
 }
 
@@ -340,7 +398,7 @@ export class OllamaProvider implements LlmProvider {
         ...req.messages,
       ],
       stream: streaming,
-      ...(this.disableThinking ? { think: false } : {}),
+      ...(this.disableThinking ? { think: ollamaThinkOff(req.model) } : {}),
       options: {
         temperature: s.temperature ?? req.temperature ?? 0.9,
         top_p: s.top_p,
@@ -389,9 +447,10 @@ export class OllamaProvider implements LlmProvider {
     // Ollama streams newline-delimited JSON, not SSE `data:` framing.
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
+    const st = newStreamState();
     let buffer = "";
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await readChunk(reader);
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -401,13 +460,22 @@ export class OllamaProvider implements LlmProvider {
         if (!trimmed) continue;
         try {
           const obj = JSON.parse(trimmed);
+          if (obj?.message?.thinking) st.thinkingChars += String(obj.message.thinking).length;
+          if (obj?.done) {
+            st.completed = true;
+            st.finishReason = obj.done_reason;
+          }
           const chunk = obj?.message?.content;
-          if (chunk) yield chunk;
+          if (chunk) {
+            st.content += chunk.length;
+            yield chunk;
+          }
         } catch {
           // skip malformed line
         }
       }
     }
+    assertReply(this.label, st, req.max_tokens ?? 1024);
   }
 }
 
@@ -478,12 +546,17 @@ export class AnthropicProvider implements LlmProvider {
     if (!res.ok || !res.body) {
       throw await providerHttpError("Anthropic", res, { model: req.model });
     }
+    const st = newStreamState();
+    st.completed = true; // no completion marker tracked for this stream; an empty reply is reported as empty
     yield* parseSseDeltas(res.body, (obj) => {
       const o = obj as { type?: string; delta?: { text?: string } };
-      if (o?.type === "content_block_delta" && o?.delta?.text)
+      if (o?.type === "content_block_delta" && o?.delta?.text) {
+        st.content += o.delta.text.length;
         return o.delta.text;
+      }
       return undefined;
     });
+    assertReply("Anthropic", st, req.max_tokens ?? 1024);
   }
 }
 
@@ -571,14 +644,18 @@ export class GeminiProvider implements LlmProvider {
     if (!res.ok || !res.body) {
       throw await providerHttpError("Gemini", res, { model: req.model });
     }
+    const st = newStreamState();
+    st.completed = true;
     yield* parseSseDeltas(res.body, (obj) => {
       const o = obj as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       };
       const parts = o?.candidates?.[0]?.content?.parts ?? [];
       const txt = parts.map((p) => p.text ?? "").join("");
+      if (txt) st.content += txt.length;
       return txt || undefined;
     });
+    assertReply("Gemini", st);
   }
 }
 
@@ -586,13 +663,14 @@ export class GeminiProvider implements LlmProvider {
 
 async function* parseSseDeltas(
   body: ReadableStream<Uint8Array>,
-  extract: (obj: unknown) => string | undefined
+  extract: (obj: unknown) => string | undefined,
+  state?: { completed: boolean }
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
-    const { value, done } = await reader.read();
+    const { value, done } = await readChunk(reader);
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
@@ -601,6 +679,7 @@ async function* parseSseDeltas(
       const trimmed = line.trim();
       if (!trimmed.startsWith("data:")) continue;
       const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]" && state) state.completed = true;
       if (!payload || payload === "[DONE]") continue;
       try {
         const obj = JSON.parse(payload);

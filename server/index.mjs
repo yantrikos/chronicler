@@ -138,7 +138,15 @@ async function proxyMcp(req, res) {
   }
 }
 
-const LLM_TIMEOUT_MS = Number(process.env.CHRONICLER_LLM_TIMEOUT_MS ?? 120_000);
+// Two limits, because a slow machine is slow in two different ways:
+//  - FIRST BYTE: how long to wait for the model to begin answering. Loading a big model and reading
+//    a long prompt on CPU can take minutes, and a reasoning model thinks before it emits anything.
+//    (CHRONICLER_LLM_TIMEOUT_MS, the old single limit, now means this.)
+//  - IDLE: how long the stream may go silent once it has started. It is reset by every chunk, so a
+//    reply that is slow but steady is never cut off. The old design capped the WHOLE exchange at
+//    120s, which silently truncated any reply taking longer than two minutes end to end.
+const LLM_TIMEOUT_MS = Number(process.env.CHRONICLER_LLM_TIMEOUT_MS ?? 600_000);
+const LLM_IDLE_MS = Number(process.env.CHRONICLER_LLM_IDLE_MS ?? 180_000);
 
 async function proxyLlm(req, res) {
   if (req.method !== "POST") {
@@ -165,7 +173,25 @@ async function proxyLlm(req, res) {
   console.log(`[llm] → ${method} ${target_url}`);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  let timer;
+  let timedOut = null; // why we aborted, if we did
+  let clientGone = false;
+  const arm = (ms, why) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = why;
+      controller.abort();
+    }, ms);
+  };
+  arm(LLM_TIMEOUT_MS, `no response from the model after ${Math.round(LLM_TIMEOUT_MS / 1000)}s`);
+  // The browser went away (Stop pressed, tab closed): cancel the upstream request so Ollama stops
+  // generating instead of finishing a reply nobody will read — and blocking the next one.
+  res.on("close", () => {
+    if (!res.writableFinished) {
+      clientGone = true;
+      controller.abort();
+    }
+  });
 
   let upstream;
   try {
@@ -176,16 +202,15 @@ async function proxyLlm(req, res) {
       signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(timeout);
-    const reason =
-      err.name === "AbortError"
-        ? `timed out after ${LLM_TIMEOUT_MS}ms`
-        : err.message;
+    clearTimeout(timer);
+    if (clientGone) {
+      console.log(`[llm] ✗ ${target_url} (client disconnected; request cancelled)`);
+      return;
+    }
+    const reason = timedOut ?? (err.name === "AbortError" ? "aborted" : err.message);
     console.log(`[llm] ✗ ${target_url} (${reason})`);
     res.writeHead(502, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify({ error: `llm upstream unreachable: ${reason}` })
-    );
+    res.end(JSON.stringify({ error: `llm upstream unreachable: ${reason}` }));
     return;
   }
 
@@ -199,17 +224,29 @@ async function proxyLlm(req, res) {
   );
   if (upstream.body) {
     const reader = upstream.body.getReader();
+    arm(LLM_IDLE_MS, `the model went silent for ${Math.round(LLM_IDLE_MS / 1000)}s mid-reply`);
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        arm(LLM_IDLE_MS, `the model went silent for ${Math.round(LLM_IDLE_MS / 1000)}s mid-reply`);
         res.write(Buffer.from(value));
       }
     } catch (err) {
-      console.log(`[llm] ✗ stream error: ${err.message}`);
+      clearTimeout(timer);
+      if (clientGone) {
+        console.log(`[llm] ✗ ${target_url} (client disconnected; upstream cancelled after ${Date.now() - started}ms)`);
+        return;
+      }
+      // Headers are already sent, so a status can't report this. End the connection abruptly (NOT a
+      // clean end): the browser then sees the stream fail instead of mistaking a cut-off reply for a
+      // finished one.
+      console.log(`[llm] ✗ stream error: ${timedOut ?? err.message}`);
+      res.destroy(new Error(timedOut ?? err.message));
+      return;
     }
   }
-  clearTimeout(timeout);
+  clearTimeout(timer);
   res.end();
   console.log(
     `[llm] ● done ${target_url} (total ${Date.now() - started}ms)`

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { ProviderModelPicker } from "./ProviderModelPicker";
+import { guessThinkingStyle } from "../../lib/providers/thinking";
 import {
   type ChroniclerConfig,
   type ProviderConfigEntry,
@@ -391,12 +393,7 @@ export function SettingsPanel({
                   </div>
                   {p.kind !== "mock" && (
                     <div className="space-y-1.5">
-                      <LabeledInput
-                        label="model"
-                        value={p.model}
-                        onChange={(v) => updateProvider(p.id, { model: v })}
-                      />
-                      {p.kind === "openai-compat" && (
+                      {(p.kind === "openai-compat" || p.kind === "ollama") && (
                         <LabeledInput
                           label="base url"
                           value={p.base_url ?? ""}
@@ -404,15 +401,22 @@ export function SettingsPanel({
                         />
                       )}
                       <LabeledInput
+                        label="model"
+                        value={p.model}
+                        onChange={(v) => updateProvider(p.id, { model: v })}
+                      />
+                      <ProviderModelPicker provider={p} onPick={(m) => updateProvider(p.id, { model: m })} />
+                      <LabeledInput
                         label="api key"
                         value={p.api_key}
                         onChange={(v) => updateProvider(p.id, { api_key: v })}
                         type="password"
                       />
                       {p.kind === "ollama" && (
-                        <label className="flex items-center gap-2 text-[11px] text-neutral-400 pt-1">
+                        <label className="flex items-start gap-2 text-[11px] text-neutral-400 pt-1">
                           <input
                             type="checkbox"
+                            className="mt-0.5"
                             checked={p.disable_thinking ?? false}
                             onChange={(e) =>
                               updateProvider(p.id, {
@@ -420,8 +424,45 @@ export function SettingsPanel({
                               })
                             }
                           />
-                          disable thinking (passes <code className="bg-neutral-900 px-1">think: false</code> — huge speedup on Qwen3)
+                          <span>
+                            turn thinking off <span className="text-neutral-500">— strongly recommended for Qwen3 / 3.5 / 3.8, DeepSeek-R1 and other reasoning models.
+                            Left on, they can spend the whole reply budget thinking and answer with nothing, or take minutes. Sends{" "}
+                            <code className="bg-neutral-900 px-1">think: false</code> (gpt-oss can't be turned off, so it gets its lowest level).</span>
+                          </span>
                         </label>
+                      )}
+                      {p.kind === "openai-compat" && (
+                        <div className="pt-1 space-y-1">
+                          <label className="flex items-start gap-2 text-[11px] text-neutral-400">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={p.disable_thinking ?? false}
+                              onChange={(e) => updateProvider(p.id, { disable_thinking: e.currentTarget.checked })}
+                            />
+                            <span>
+                              turn thinking off <span className="text-neutral-500">— for reasoning models served through an OpenAI-style API. The switch differs
+                              by server; pick yours below.</span>
+                            </span>
+                          </label>
+                          {(p.disable_thinking ?? false) && (
+                            <label className="flex items-center gap-2 text-[11px] text-neutral-400 pl-5">
+                              how
+                              <select
+                                className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-0.5 text-[11px] text-neutral-200"
+                                value={p.thinking_style ?? "auto"}
+                                onChange={(e) =>
+                                  updateProvider(p.id, { thinking_style: e.currentTarget.value === "auto" ? undefined : (e.currentTarget.value as "none" | "reasoning_effort" | "template_kwargs") })
+                                }
+                              >
+                                <option value="auto">auto ({guessThinkingStyle(p.base_url ?? "") === "reasoning_effort" ? "Ollama /v1" : "send nothing"})</option>
+                                <option value="reasoning_effort">Ollama /v1 — reasoning_effort: none</option>
+                                <option value="template_kwargs">vLLM / llama.cpp / LM Studio — chat_template_kwargs</option>
+                                <option value="none">send nothing</option>
+                              </select>
+                            </label>
+                          )}
+                        </div>
                       )}
                       <details className="pt-1">
                         <summary className="text-[11px] text-neutral-400 cursor-pointer hover:text-neutral-200">

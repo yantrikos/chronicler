@@ -283,7 +283,8 @@ function buildProvider(p: ProviderConfigEntry): LlmProvider {
       p.base_url ?? "https://api.openai.com/v1",
       p.api_key,
       p.label,
-      p.disable_thinking ?? false
+      p.disable_thinking ?? false,
+      p.thinking_style
     );
   return new MockProvider();
 }

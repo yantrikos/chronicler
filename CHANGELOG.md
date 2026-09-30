@@ -2,6 +2,39 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.3] — 2026-09-30 — Thinking models, slow machines, and a model picker
+
+Fixes "Ollama is invoked, there are no errors, and the character never replies", and adds a list of the models a server offers.
+
+### Fixed
+- **Reasoning models could answer with nothing.** Qwen3 / 3.5 / 3.8, DeepSeek-R1 and similar models think before replying, and that thinking counts against the reply's
+  token budget. Left on, they can spend all of it thinking and finish with an empty reply and no error (reproduced: `qwen3.5:4b` and `9b`, `qwen3.6:35b` used all
+  1,024 tokens and returned no text; with thinking off the 4B replied in ~1.5 s instead of ~21 s). Chronicler now says so — *"…spent its whole reply budget
+  thinking… Turn thinking off for this provider in Settings"* — for Ollama and OpenAI-compatible servers (and reports any empty reply, from any provider, instead
+  of showing nothing).
+- **"Turn thinking off" now works through Ollama's OpenAI-compatible URL.** Ollama's `/v1` endpoint silently ignores `think: false` and only honours
+  `reasoning_effort: "none"`; providers added as "OpenAI-compatible" pointing at `:11434/v1` (very common) could never turn thinking off. The setting is now available
+  for them too, with a choice of switch for vLLM / llama.cpp / LM Studio (`chat_template_kwargs`; **not verified** here — no such server was available).
+  gpt-oss, which ignores `think: false`, gets its lowest level.
+- **The 120-second proxy cap cut slow replies.** The limit was on the *whole* exchange, so any reply taking longer than two minutes end to end (a big model on
+  CPU, a model that thinks first) was silently truncated — the server ended the response normally and the app could not tell. It is now a long allowance for the
+  model to start answering (10 minutes) plus an idle limit between chunks (3 minutes), both configurable (`CHRONICLER_LLM_TIMEOUT_MS`, `CHRONICLER_LLM_IDLE_MS`);
+  a stalled stream now fails visibly instead of looking finished.
+- **Stop now stops the model.** The server keeps reading the model's reply after you press Stop or close the tab; it now cancels the request so Ollama is free for your
+  next message instead of finishing a reply nobody will read.
+
+### Added
+- **Model list.** *Settings → Providers → load models from this server* lists what Ollama, vLLM, llama.cpp (incl. Vulkan builds), LM Studio, OpenRouter, OpenAI,
+  Anthropic or Gemini offers; click one to use it. Only Ollama's list was exercised against a live server; the others follow those projects' documented formats.
+- The Ollama base URL is editable in Settings (it was only editable for OpenAI-compatible providers), an LM Studio preset, and local-server presets that use
+  `host.docker.internal` (a bare `localhost` means the container itself under Docker).
+
+### Tests
+- New tests: thinking control per backend, empty-reply and truncated-stream handling through the real provider classes, model-list parsing, and the proxy's timeout and
+  cancellation behaviour against fake slow upstreams.
+
+---
+
 ## [0.6.2] — 2026-09-30 — A browser with no model connected now says so
 
 Fixes a regression introduced in 0.6.0 that looked exactly like "my character never replies".

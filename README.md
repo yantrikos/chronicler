@@ -71,6 +71,18 @@ Almost always the model connection, not the app. When a reply fails Chronicler s
 - **"doesn't have <model>"** — the model name in Settings isn't installed on that Ollama. Run `ollama pull <model>` in a terminal, or pick one you have (`ollama list`). The first-run wizard now checks this for you.
 - **"Couldn't reach …"** — Chronicler can't connect to the address in Settings. If Chronicler runs in Docker, `localhost` means the container itself: use `http://host.docker.internal:11434` for an Ollama on the same machine. On Linux, also start Ollama with `OLLAMA_HOST=0.0.0.0` so it listens beyond loopback (the bundled `docker-compose.yml` maps `host.docker.internal` for you; re-pull it if you copied an older one).
 - **"rejected the credentials"** — the API key in Settings is wrong or expired.
+- **The dots spin for a long time, then you get "spent its whole reply budget thinking" (or, on an older version, nothing at all)** — a *reasoning* model (Qwen3 / 3.5 / 3.8, DeepSeek-R1, gpt-oss…) used its whole token budget thinking and wrote no reply. Turn thinking off for that provider: **Settings → Providers → "turn thinking off"**. The switch differs by server, so Chronicler sends the right one:
+
+  | Server / how it is added | What Chronicler sends when thinking is off | Checked |
+  |---|---|---|
+  | Ollama (native provider) | `think: false` (gpt-oss ignores `false`, so it gets `"low"`) | yes, against Ollama 0.33 with qwen3.5, qwen3.6, qwen3.8, gpt-oss, qwen2.5 |
+  | Ollama through an OpenAI-compatible URL (`…:11434/v1`) | `reasoning_effort: "none"` — Ollama's `/v1` endpoint silently **ignores** `think: false` | yes |
+  | vLLM, llama.cpp server (CPU / CUDA / Metal / Vulkan builds), LM Studio | `chat_template_kwargs: {"enable_thinking": false}` — choose *vLLM / llama.cpp / LM Studio* under "how" | **not checked** — no such server was available; it follows those projects' documentation |
+  | Hosted OpenAI-style APIs | nothing (they reject unknown fields) | — |
+
+  Measured on one machine with `qwen3.5:4b`: thinking left on used all 1,024 tokens and returned no text after ~21 s; with it off the reply arrived in ~1.5 s.
+- **A slow machine: replies cut short or "dropped"** — Chronicler waits up to 10 minutes for a model to start answering and 3 minutes of silence mid-reply (set `CHRONICLER_LLM_TIMEOUT_MS` / `CHRONICLER_LLM_IDLE_MS` on the `chronicler` service to change them). A smaller model, or thinking off, is usually the real fix. Pressing **Stop** now also stops the model.
+- **Not sure which models you have** — in Settings → Providers press **load models from this server** (Ollama, vLLM, llama.cpp, LM Studio, OpenRouter, OpenAI, Anthropic, Gemini) and click one.
 - **You get a strange placeholder like "(stays in character, does not invent anything not in canon)"** — you chose "Skip" in the wizard, so the built-in mock provider is answering. Add a real provider in Settings → Providers.
 
 ---

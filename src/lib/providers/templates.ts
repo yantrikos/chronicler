@@ -5,6 +5,9 @@
 // the base URL + label + suggested model. Templates collapse the "add a
 // provider" flow from "look up the URL on the web" to "pick from a list".
 //
+// Local servers use host.docker.internal because Chronicler normally runs in Docker, where
+// "localhost" is the container itself; running outside Docker, edit the address.
+//
 // To add a new template: just append an entry below. To support a
 // genuinely new wire protocol (e.g. Gemini), add a dedicated adapter
 // class to providers/index.ts instead.
@@ -144,7 +147,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
       id: nextId("kobold"),
       kind: "openai-compat",
       label: "KoboldCpp",
-      base_url: "http://localhost:5001/v1",
+      base_url: "http://host.docker.internal:5001/v1",
       api_key: "",
       model: "default",
     }),
@@ -152,12 +155,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   {
     key: "llamacpp",
     label: "llama.cpp server",
-    hint: "Local llama.cpp HTTP server (OpenAI-compatible at /v1).",
+    hint: "Local llama.cpp HTTP server — CPU, CUDA, Metal or Vulkan builds (OpenAI-compatible at /v1). Reasoning model? Tick 'turn thinking off' and choose the llama.cpp option.",
     build: () => ({
       id: nextId("llamacpp"),
       kind: "openai-compat",
       label: "llama.cpp",
-      base_url: "http://localhost:8080/v1",
+      base_url: "http://host.docker.internal:8080/v1",
       api_key: "",
       model: "default",
     }),
@@ -165,14 +168,27 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   {
     key: "vllm",
     label: "vLLM",
-    hint: "Self-hosted vLLM server (OpenAI-compatible).",
+    hint: "Self-hosted vLLM server (OpenAI-compatible). Reasoning model? Tick 'turn thinking off' and choose the vLLM option.",
     build: () => ({
       id: nextId("vllm"),
       kind: "openai-compat",
       label: "vLLM",
-      base_url: "http://localhost:8000/v1",
+      base_url: "http://host.docker.internal:8000/v1",
       api_key: "",
       model: "default",
+    }),
+  },
+  {
+    key: "lmstudio",
+    label: "LM Studio",
+    hint: "Local LM Studio server (OpenAI-compatible, default port 1234). Start its server first, then use 'load models'.",
+    build: () => ({
+      id: nextId("lmstudio"),
+      kind: "openai-compat",
+      label: "LM Studio",
+      base_url: "http://host.docker.internal:1234/v1",
+      api_key: "",
+      model: "",
     }),
   },
   {

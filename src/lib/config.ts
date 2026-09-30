@@ -18,6 +18,9 @@ export interface ProviderConfigEntry {
   /** For Qwen3 / thinking-capable models on Ollama: pass `think: false` in
    *  the request body to skip the hidden reasoning phase. */
   disable_thinking?: boolean;
+  /** How an OpenAI-compatible provider is told to stop thinking (Ollama /v1 needs
+   *  "reasoning_effort"; vLLM / llama.cpp use "template_kwargs"). Undefined = guess from the address. */
+  thinking_style?: "none" | "reasoning_effort" | "template_kwargs";
   /** Sampling parameters. Unset values fall back to provider defaults. */
   temperature?: number;
   top_p?: number;
