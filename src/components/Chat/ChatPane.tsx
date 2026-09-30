@@ -14,7 +14,8 @@ const CAN_HOVER =
 
 interface Props {
   turns: ChatTurn[];
-  onSend: (text: string, attachments?: TurnAttachment[]) => void | Promise<void>;
+  /** Resolve `false` when the message was refused (e.g. no model connected) so the composer keeps the text. */
+  onSend: (text: string, attachments?: TurnAttachment[]) => void | boolean | Promise<void | boolean>;
   /** Image attachments. When set, the composer offers an attach button (and
    *  accepts paste / drag-drop); the image is described by `describe` and the
    *  player reviews the description before it enters the story. */
@@ -181,7 +182,8 @@ export function ChatPane({
     }
     setDraft("");
     setPending(null);
-    await onSend(text, att ? [att] : undefined);
+    const sent = await onSend(text, att ? [att] : undefined);
+    if (sent === false) setDraft(text); // refused — don't lose what they typed
     taRef.current?.focus();
   }
 

@@ -94,6 +94,7 @@ import { CoreTraitVerifier } from "./lib/skills/core-trait-verifier";
 import { CoreTraitPromoter } from "./lib/skills/core-trait-promoter";
 import { SelfModelGenerator } from "./lib/identity/self-model-generator";
 import { applyEnactments, ensureEnactments, traitKey } from "./lib/identity/trait-enactment";
+import { NoModelBar, NO_MODEL_MESSAGE } from "./components/Notices/NoModelBar";
 import { loadEnactments, saveEnactments } from "./lib/identity/enactment-store";
 import {
   loadSelfModel,
@@ -206,6 +207,7 @@ import {
   activePersona,
   activeProvider,
   providerForRole,
+  needsProvider,
   defaultConfig,
   extractionProvider,
   loadConfig,
@@ -659,7 +661,7 @@ function App() {
     // in-progress chat; jump to chat if nothing imported yet.
     if (chars.length > 0) setView("library");
     // First-run: no real providers + no persona + no characters → wizard.
-    if (shouldShowWizard(cfg, chars.length > 0)) {
+    if (shouldShowWizard(cfg)) {
       setWizardOpen(true);
     }
   }, []);
@@ -2653,6 +2655,11 @@ function App() {
     } = {}
   ): Promise<void> {
     if (!sessionId || !scene) return;
+    // Never let the placeholder mock provider "answer" as if it were a model.
+    if (needsProvider(config)) {
+      setErrorMsg(NO_MODEL_MESSAGE);
+      return;
+    }
     setThinking(true);
     setStreamingText("");
     const abort = new AbortController();
@@ -3154,7 +3161,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.proactive_mode, config.proactive_idle_seconds, characters, thinking]);
 
-  async function onSend(text: string, attachments?: TurnAttachment[]) {
+  async function onSend(text: string, attachments?: TurnAttachment[]): Promise<boolean | void> {
     setErrorMsg(null);
     lastUserTurnAtRef.current = Date.now();
     if (characters.length === 0) {
@@ -3194,6 +3201,12 @@ function App() {
     if (!speakerChar) {
       setErrorMsg(`Speaker "${speakerId}" not found among ${characters.length} characters.`);
       return;
+    }
+    // No real model connected (e.g. a browser that pulled its chats from the server but was never
+    // set up): refuse before adding the message, and report false so the composer keeps the text.
+    if (needsProvider(config)) {
+      setErrorMsg(NO_MODEL_MESSAGE);
+      return false;
     }
     // Before sending the next user turn, score the prior assistant turn's
     // skills positively — the user moved on without regenerating, editing,
@@ -3605,9 +3618,29 @@ function App() {
       ? characters[0].description ?? ""
       : `Group scene · ${characters.length} characters`;
 
+  // Rendered from BOTH the library and chat views. It used to live only in the chat view's return, so a
+  // browser that landed on the library (any browser with prior chats, e.g. after pulling them from the
+  // server) opened the wizard invisibly.
+  const wizardElement = wizardOpen ? (
+    <FirstRunWizard
+      onComplete={applyWizardPatch}
+      onImportCard={(f) => {
+        void onImportCard(f);
+        dismissWizard();
+      }}
+      onTryDemo={() => {
+        void loadDemoCharacter("ren");
+        dismissWizard();
+      }}
+      onSkip={dismissWizard}
+    />
+  ) : null;
+
   if (view === "library") {
     return (
-      <div className="h-screen text-sm">
+      <div className="h-screen text-sm flex flex-col">
+        {needsProvider(config) && <NoModelBar onOpenSettings={() => setSettingsOpen(true)} />}
+        <div className="flex-1 min-h-0">
         <CharacterLibrary
           characters={libraryCharacters}
           sessions={sessions}
@@ -3667,6 +3700,8 @@ function App() {
           onDeleteWorld={onDeleteWorld}
           onStartStory={() => void onStartStory()}
         />
+        </div>
+        {wizardElement}
         {editingCharacterId &&
           (() => {
             const target = libraryCharacters.find(
@@ -3968,6 +4003,7 @@ function App() {
             )}
           </div>
         )}
+        {needsProvider(config) && <NoModelBar onOpenSettings={() => setSettingsOpen(true)} />}
         {errorMsg && (
           <div className="px-6 py-2 bg-red-900/60 border-b border-red-700 text-red-100 text-xs flex items-start justify-between gap-4">
             <span className="font-mono">{errorMsg}</span>
@@ -4462,20 +4498,7 @@ function App() {
         />
       )}
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
-      {wizardOpen && (
-        <FirstRunWizard
-          onComplete={applyWizardPatch}
-          onImportCard={(f) => {
-            void onImportCard(f);
-            dismissWizard();
-          }}
-          onTryDemo={() => {
-            void loadDemoCharacter("ren");
-            dismissWizard();
-          }}
-          onSkip={dismissWizard}
-        />
-      )}
+      {wizardElement}
       {lorebookCharacterId &&
         (() => {
           // The same editor handles both per-character and world lorebooks

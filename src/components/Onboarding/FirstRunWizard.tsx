@@ -43,15 +43,15 @@ export function markWizardDismissed(): void {
  *  characters imported. We treat the mock-only default config as
  *  "untouched": if the user added any provider beyond Mock or set a
  *  non-"You" persona, the wizard stays out of the way. */
-export function shouldShowWizard(
-  cfg: ChroniclerConfig,
-  hasCharacters: boolean
-): boolean {
+export function shouldShowWizard(cfg: ChroniclerConfig): boolean {
   if (hasDismissedWizard()) return false;
   const realProviders = (cfg.providers ?? []).filter((p) => p.kind !== "mock");
   const personaConfigured =
     (cfg.user_personas ?? []).some((p) => p.name && p.name !== "You" && p.name !== "Untitled persona");
-  return !realProviders.length && !personaConfigured && !hasCharacters;
+  // Whether characters exist is deliberately NOT part of this: a browser that just pulled its
+  // chats from the server has characters but no provider (settings are not synced), and that is
+  // exactly when the wizard is needed.
+  return !realProviders.length && !personaConfigured;
 }
 
 type ProviderQuickPick = "ollama" | "openai" | "anthropic" | "skip";

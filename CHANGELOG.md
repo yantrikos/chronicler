@@ -2,6 +2,29 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.2] — 2026-09-30 — A browser with no model connected now says so
+
+Fixes a regression introduced in 0.6.0 that looked exactly like "my character never replies".
+
+**What happened.** 0.6.0 keeps your chats on the server so they survive clearing a browser. Open Chronicler from a second browser, another device, a new
+profile or after clearing site data and your chats now appear — but the connection to a model (Ollama, OpenAI, Anthropic…) is deliberately *not* carried
+over, because it holds API keys. That browser had no model connected, the first-run wizard stayed away (it only opened when there were no characters, and
+the chats had just arrived), and the built-in placeholder provider answered every message with "(stays in character, does not invent anything not in
+canon)". Nothing said a model was missing.
+
+### Fixed
+- **The wizard appears** on a browser that has no model connected even when chats were pulled from the server, and it is now shown from the library view
+  as well as the chat view (it had only ever been mounted in the chat view, so it opened invisibly for anyone who landed on the library).
+- **A clear "No model is connected on this browser yet" bar** with a *connect a model* button, in both the library and the chat, for anyone who has no real
+  model connected — including people who skipped the wizard earlier.
+- **No more placeholder replies.** Sending without a connected model is refused with a plain message instead; the text you typed stays in the box, and
+  regenerate/continue/swipe are refused the same way.
+
+### Tests
+- New tests for what counts as "no model connected" and for when the wizard opens.
+
+---
+
 ## [0.6.1] — 2026-09-30 — When a reply fails, say why
 
 Fixes the "my character never replies" reports. The core chat flow works on a fresh install of the published images; what failed for some people was the

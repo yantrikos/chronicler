@@ -207,6 +207,15 @@ export function providerForRole(cfg: ChroniclerConfig, role: ProviderRole): Prov
   return chat?.supports_vision ? chat : undefined;
 }
 
+/** True when chat would go to the built-in mock provider, i.e. no real model is connected.
+ *  This is the state of a browser that has never been set up — including one that just pulled
+ *  its chats from the server (provider settings are deliberately not synced: they hold API
+ *  keys). The mock answers with a placeholder line, so the app must say so instead. */
+export function needsProvider(cfg: ChroniclerConfig): boolean {
+  const p = providerForRole(cfg, "chat");
+  return !p || p.kind === "mock";
+}
+
 export function activeProvider(cfg: ChroniclerConfig): ProviderConfigEntry | undefined {
   return cfg.providers.find((p) => p.id === cfg.active_provider_id) ?? cfg.providers[0];
 }
