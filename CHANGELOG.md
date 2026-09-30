@@ -2,6 +2,32 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.1] — 2026-09-30 — When a reply fails, say why
+
+Fixes the "my character never replies" reports. The core chat flow works on a fresh install of the published images; what failed for some people was the
+connection to their model, and Chronicler gave no usable explanation. This gap is not new in 0.6.0 (the same status-only errors and default model were in
+0.5.0) — a wider audience just hit it.
+
+### Fixed
+- **Streaming failures now say why.** A failed reply used to read "Ollama (local) stream failed: 404" — the status code only; the real reason in the response
+  was discarded. It now reads, for example, *"Ollama (local) doesn't have "qwen3:4b". Run "ollama pull qwen3:4b"… (HTTP 404: model 'qwen3:4b' not found)"*, or
+  *"Couldn't reach Ollama (local) at http://…. If Chronicler runs in Docker, "localhost" means the container itself…"*, with matching explanations for rejected
+  API keys, rate limits and server errors — across Ollama, OpenAI-compatible, Anthropic and Gemini.
+- **First-run wizard checks Ollama.** When you pick Ollama it now tests the address and lists the models you actually have. The default model `qwen3:4b` is
+  replaced with a sensible installed one (the smallest real chat model of at least 3B — never an image or embedding model) if it isn't installed, and if
+  it can't tell, it shows your models to choose from instead of guessing.
+- **Linux Docker:** the bundled `docker-compose.yml` now maps `host.docker.internal`, so a locally-run Ollama is reachable from the container. (Docker Desktop
+  on macOS/Windows already provided this name. On Linux also start Ollama with `OLLAMA_HOST=0.0.0.0`; if you copied an older compose file, add the
+  `extra_hosts` entry.)
+
+### Added
+- A "My character never replies" section in the README listing the usual causes.
+
+### Tests
+- CI now runs the full suite; two new test files cover the error messages (through the real provider classes) and the Ollama check.
+
+---
+
 ## [0.6.0] — 2026-09-30 — A better place to play, and honest measurement
 
 A large release: a redesigned interface, tools for long and steerable roleplay, durable server-side storage, optional graphics and vision, a character

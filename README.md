@@ -64,6 +64,15 @@ First-run flow:
 5. **+ card** to import a v2/v3 character card (.png or .json), or **demo: Ren** to try a built-in character.
 6. Type and send. First reply takes a beat while memories seed; subsequent turns stream.
 
+### My character never replies
+
+Almost always the model connection, not the app. When a reply fails Chronicler shows a red bar near the top of the chat saying why; the usual causes:
+
+- **"doesn't have <model>"** — the model name in Settings isn't installed on that Ollama. Run `ollama pull <model>` in a terminal, or pick one you have (`ollama list`). The first-run wizard now checks this for you.
+- **"Couldn't reach …"** — Chronicler can't connect to the address in Settings. If Chronicler runs in Docker, `localhost` means the container itself: use `http://host.docker.internal:11434` for an Ollama on the same machine. On Linux, also start Ollama with `OLLAMA_HOST=0.0.0.0` so it listens beyond loopback (the bundled `docker-compose.yml` maps `host.docker.internal` for you; re-pull it if you copied an older one).
+- **"rejected the credentials"** — the API key in Settings is wrong or expired.
+- **You get a strange placeholder like "(stays in character, does not invent anything not in canon)"** — you chose "Skip" in the wizard, so the built-in mock provider is answering. Add a real provider in Settings → Providers.
+
 ---
 
 ## What makes it different

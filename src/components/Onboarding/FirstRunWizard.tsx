@@ -7,8 +7,14 @@
 //
 // We do NOT validate provider credentials here — Settings handles that.
 // The wizard just makes "where do I even start" obvious for new users.
+//
+// One exception: for Ollama we check the address and list the installed
+// models, because "the default model isn't installed" and "Ollama isn't
+// reachable from Docker" are what make a brand-new install silently never
+// reply. Saying so here is far kinder than a failed first message.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { chatModels, isInstalled, pickModel, probeOllama, type OllamaProbe } from "../../lib/providers/ollama-models";
 import type {
   ChroniclerConfig,
   ProviderConfigEntry,
@@ -57,6 +63,8 @@ interface Props {
   onSkip: () => void;
 }
 
+const FACTORY_OLLAMA_MODEL = "qwen3:4b";
+
 export function FirstRunWizard({
   onComplete,
   onImportCard,
@@ -68,10 +76,33 @@ export function FirstRunWizard({
   const [providerUrl, setProviderUrl] = useState<string>(
     "http://host.docker.internal:11434"
   );
-  const [providerModel, setProviderModel] = useState<string>("qwen3:4b");
+  const [providerModel, setProviderModel] = useState<string>(FACTORY_OLLAMA_MODEL);
+  const [probe, setProbe] = useState<OllamaProbe | "checking" | null>(null);
+  const modelTouched = useRef(false);
   const [providerKey, setProviderKey] = useState<string>("");
   const [personaName, setPersonaName] = useState<string>("");
   const [personaDesc, setPersonaDesc] = useState<string>("");
+
+  // Check the Ollama address shortly after the person stops typing, and if the
+  // untouched default model isn't installed, switch to one that is.
+  useEffect(() => {
+    if (step !== 1 || providerKind !== "ollama") {
+      setProbe(null);
+      return;
+    }
+    const ctl = new AbortController();
+    setProbe("checking");
+    const t = setTimeout(async () => {
+      const r = await probeOllama(providerUrl, ctl.signal);
+      if (ctl.signal.aborted) return;
+      setProbe(r);
+      if (r.ok) setProviderModel((cur) => pickModel(cur, FACTORY_OLLAMA_MODEL, r.models, modelTouched.current));
+    }, 600);
+    return () => {
+      clearTimeout(t);
+      ctl.abort();
+    };
+  }, [step, providerKind, providerUrl]);
 
   function finishProviderStep(): Partial<ChroniclerConfig> {
     if (providerKind === "skip") return {};
@@ -149,8 +180,14 @@ export function FirstRunWizard({
               url={providerUrl}
               model={providerModel}
               apiKey={providerKey}
+              probe={probe}
+              onPickModel={(m) => {
+                modelTouched.current = true;
+                setProviderModel(m);
+              }}
               onKind={(k) => {
                 setProviderKind(k);
+                modelTouched.current = false;
                 // Helpful URL/model defaults per kind
                 if (k === "ollama") {
                   setProviderUrl("http://host.docker.internal:11434");
@@ -164,7 +201,10 @@ export function FirstRunWizard({
                 }
               }}
               onUrl={setProviderUrl}
-              onModel={setProviderModel}
+              onModel={(m) => {
+                modelTouched.current = true;
+                setProviderModel(m);
+              }}
               onApiKey={setProviderKey}
             />
           )}
@@ -280,11 +320,15 @@ function StepProvider({
   onUrl,
   onModel,
   onApiKey,
+  probe,
+  onPickModel,
 }: {
   kind: ProviderQuickPick;
   url: string;
   model: string;
   apiKey: string;
+  probe: OllamaProbe | "checking" | null;
+  onPickModel: (m: string) => void;
   onKind: (k: ProviderQuickPick) => void;
   onUrl: (v: string) => void;
   onModel: (v: string) => void;
@@ -353,6 +397,7 @@ function StepProvider({
               kind === "ollama" ? "qwen3:4b" : "gpt-4o-mini"
             }
           />
+          {kind === "ollama" && <OllamaStatus probe={probe} model={model} onPick={onPickModel} />}
           {kind !== "ollama" && (
             <LabeledField
               label="API key"
@@ -365,6 +410,62 @@ function StepProvider({
         </div>
       )}
     </div>
+  );
+}
+
+function OllamaStatus({
+  probe,
+  model,
+  onPick,
+}: {
+  probe: OllamaProbe | "checking" | null;
+  model: string;
+  onPick: (m: string) => void;
+}) {
+  if (!probe) return null;
+  if (probe === "checking") {
+    return <p className="text-[11px] text-neutral-500" role="status">Checking Ollama…</p>;
+  }
+  if (!probe.ok) {
+    if (probe.reason === "cancelled") return null;
+    return (
+      <p className="text-[11px] leading-relaxed text-amber-300" role="status">
+        ⚠ {probe.reason}
+        <span className="block text-neutral-500">You can continue anyway and fix this later in Settings.</span>
+      </p>
+    );
+  }
+  if (probe.models.length === 0) {
+    return (
+      <p className="text-[11px] leading-relaxed text-amber-300" role="status">
+        ⚠ Connected, but this Ollama has no models yet. Run <code className="font-mono">ollama pull {model || "qwen3.5:4b"}</code> in a
+        terminal, then come back.
+      </p>
+    );
+  }
+  if (!isInstalled(model, probe.models)) {
+    return (
+      <div className="text-[11px] leading-relaxed" role="status">
+        <p className="text-amber-300">⚠ This Ollama doesn't have “{model || "(no model)"}”. Pick one you have:</p>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {chatModels(probe.models).slice(0, 12).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onPick(m)}
+              className="rounded border border-neutral-700 px-2 py-0.5 text-neutral-200 hover:border-emerald-500/60"
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <p className="text-[11px] text-emerald-300" role="status">
+      ✓ Connected — “{model}” is installed ({probe.models.length} model{probe.models.length === 1 ? "" : "s"} available).
+    </p>
   );
 }
 

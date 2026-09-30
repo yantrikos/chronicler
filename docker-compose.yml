@@ -72,6 +72,13 @@ services:
       # drop the trailing flag to make it read-only if you only ever
       # install manually. Override the host path via $CHRONICLER_PLUGINS_HOST.
       - ${CHRONICLER_PLUGINS_HOST:-~/.chronicler/plugins}:/data/plugins:rw
+    # Lets the container reach a model server running on the same machine
+    # (Ollama, LM Studio…) as http://host.docker.internal:<port>. Docker
+    # Desktop (macOS/Windows) provides this name itself; on Linux it does not
+    # exist unless it is mapped like this, and without it a locally-run Ollama
+    # is unreachable and the character never replies.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:3001:3001"
 

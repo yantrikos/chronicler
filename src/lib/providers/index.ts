@@ -9,6 +9,8 @@
 // The server translates { target_url, method, headers, body } into a real
 // upstream call and streams the response back (SSE passes through).
 
+import { providerHttpError } from "./errors";
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
@@ -147,7 +149,7 @@ function resolveProxyEndpoint(): string {
 
 const PROXY_ENDPOINT = resolveProxyEndpoint();
 
-interface ProxyFetchOpts {
+export interface ProxyFetchOpts {
   target_url: string;
   method?: string;
   headers?: Record<string, string>;
@@ -155,7 +157,7 @@ interface ProxyFetchOpts {
   signal?: AbortSignal;
 }
 
-async function proxyFetch(opts: ProxyFetchOpts): Promise<Response> {
+export async function proxyFetch(opts: ProxyFetchOpts): Promise<Response> {
   return fetch(PROXY_ENDPOINT, {
     signal: opts.signal,
     method: "POST",
@@ -245,9 +247,7 @@ export class OpenAICompatProvider implements LlmProvider {
       body: this.buildBody(req, false),
     });
     if (!res.ok) {
-      throw new Error(
-        `${this.label} chat failed: ${res.status} ${await res.text()}`
-      );
+      throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
     const data = await res.json();
     // Reasoning models (deepseek-r1, gpt-5 thinking, etc) sometimes put the
@@ -300,7 +300,7 @@ export class OpenAICompatProvider implements LlmProvider {
       body: this.buildBody(req, true),
     });
     if (!res.ok || !res.body) {
-      throw new Error(`${this.label} stream failed: ${res.status}`);
+      throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
     yield* parseSseDeltas(res.body, (obj) => {
       const o = obj as { choices?: Array<{ delta?: { content?: string } }> };
@@ -360,9 +360,7 @@ export class OllamaProvider implements LlmProvider {
       body: this.buildBody(req, false),
     });
     if (!res.ok) {
-      throw new Error(
-        `${this.label} chat failed: ${res.status} ${await res.text()}`
-      );
+      throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
     const data = await res.json();
     const content = data?.message?.content ?? "";
@@ -386,7 +384,7 @@ export class OllamaProvider implements LlmProvider {
       body: this.buildBody(req, true),
     });
     if (!res.ok || !res.body) {
-      throw new Error(`${this.label} stream failed: ${res.status}`);
+      throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
     // Ollama streams newline-delimited JSON, not SSE `data:` framing.
     const reader = res.body.getReader();
@@ -452,9 +450,7 @@ export class AnthropicProvider implements LlmProvider {
       body: this.buildBody(req, false),
     });
     if (!res.ok) {
-      throw new Error(
-        `anthropic chat failed: ${res.status} ${await res.text()}`
-      );
+      throw await providerHttpError("Anthropic", res, { model: req.model });
     }
     const data = await res.json();
     const content = (data?.content ?? [])
@@ -480,7 +476,7 @@ export class AnthropicProvider implements LlmProvider {
       body: this.buildBody(req, true),
     });
     if (!res.ok || !res.body) {
-      throw new Error(`anthropic stream failed: ${res.status}`);
+      throw await providerHttpError("Anthropic", res, { model: req.model });
     }
     yield* parseSseDeltas(res.body, (obj) => {
       const o = obj as { type?: string; delta?: { text?: string } };
@@ -548,7 +544,7 @@ export class GeminiProvider implements LlmProvider {
       body: this.buildBody(req),
     });
     if (!res.ok) {
-      throw new Error(`gemini chat failed: ${res.status} ${await res.text()}`);
+      throw await providerHttpError("Gemini", res, { model: req.model });
     }
     const data = await res.json();
     const content = (data?.candidates?.[0]?.content?.parts ?? [])
@@ -573,7 +569,7 @@ export class GeminiProvider implements LlmProvider {
       body: this.buildBody(req),
     });
     if (!res.ok || !res.body) {
-      throw new Error(`gemini stream failed: ${res.status}`);
+      throw await providerHttpError("Gemini", res, { model: req.model });
     }
     yield* parseSseDeltas(res.body, (obj) => {
       const o = obj as {
