@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { BackgroundModelHint } from "./BackgroundModelHint";
 import { guessThinkingStyle } from "../../lib/providers/thinking";
 import {
   type ChroniclerConfig,
@@ -353,6 +354,7 @@ export function SettingsPanel({
                 </p>
               </div>
             )}
+            <BackgroundModelHint value={draft} onChange={setDraft} />
             <div className="space-y-2">
               {draft.providers.map((p) => (
                 <div

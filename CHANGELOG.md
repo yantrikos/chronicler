@@ -2,6 +2,30 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.4] — 2026-09-30 — Your next message goes first
+
+Fixes "a big model is slow with Chronicler" — the model's own speed is what it is, but Chronicler was making it feel much slower.
+
+**What was happening.** After every reply Chronicler runs background calls (fact extraction, scene board, ledger, story summary), by default on the *same* model as the chat.
+A model server does one thing at a time, so a message sent right after a reply queued behind them. Measured with `qwen3.8` 27B (~5 tokens/s on an M4 Pro): the second reply's
+first word arrived after **37.9 s** instead of 3.5 s, and it took 46 s to finish.
+
+### Fixed
+- **Chat now has priority over background work on a shared local model.** Background calls wait while a chat request is in flight, are cancelled the moment one starts (the proxy
+  then cancels them at the model server), and are retried once you are idle — nothing is dropped, only delayed (after three cancellations in a row a call gives up, so fast typing
+  cannot cause endless repeated work). Same session afterwards: second reply's first word **1.2 s**, finished in **14 s**. It only applies when chat and background use the same
+  local server; a separate background model or a hosted API is untouched.
+
+### Added
+- **"Use a small model for background tasks"** in Settings, shown when your chat model is large (judged by the size Ollama reports, so `:latest` tags work too). One click adds the
+  smallest suitable installed chat model as the background model. With `qwen3.5:4b` for background work the same session took ~8 s of background work instead of ~60 s and the
+  second reply finished in 5 s. It needs enough memory to keep both models loaded; if Ollama has to swap them, each swap costs a few seconds.
+
+### Tests
+- New tests for the scheduler: waiting, cancel-and-retry, giving up, the caller's own abort, and release on errors or early stop.
+
+---
+
 ## [0.6.3] — 2026-09-30 — Thinking models, slow machines, and a model picker
 
 Fixes "Ollama is invoked, there are no errors, and the character never replies", and adds a list of the models a server offers.

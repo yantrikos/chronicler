@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   check(paramBillions("qwen3.5:4b") === 4 && paramBillions("llama3:70b-instruct") === 70 && paramBillions("qwen3.5:0.8b") === 0.8 && paramBillions("yantrik:latest") === null, "parameter counts are read from the tag");
   const mine = ["qwen3.6:35b", "x/z-image-turbo:latest", "qwen2.5:1.5b", "qwen3.5:9b", "yantrik:latest", "qwen3.5:4b", "nomic-embed-text:latest"];
   check(suggestChatModel(mine) === "qwen3.5:4b", "from a real mixed list it suggests the smallest real chat model of at least 3B (not the 35B, not the image/embedding models, not the 1.5B)");
+  check(suggestChatModel(["big:latest", "small:latest"], { "big:latest": 27.3, "small:latest": 4.3 }) === "small:latest" && suggestChatModel(["a:latest", "b:latest"], { "a:latest": 1.5, "b:latest": 0.8 }) === null, "a :latest tag is judged by the size Ollama reports (smallest of at least 3B; under 3B never suggested)");
   check(suggestChatModel(["nomic-embed-text:latest", "x/z-image-turbo:latest"]) === null, "with only non-chat models it suggests nothing");
   check(suggestChatModel(["mystery:latest", "qwen2.5:1.5b"]) === null, "with no size it can trust, it does not guess");
   check(chatModels(mine).join(",") === "qwen3.6:35b,qwen2.5:1.5b,qwen3.5:9b,yantrik:latest,qwen3.5:4b" && !chatModels(mine).some((m) => /image|embed/.test(m)), "the choices offered exclude image and embedding models");

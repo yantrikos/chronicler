@@ -52,10 +52,10 @@ export function paramBillions(model: string): number | null {
 /** A sensible chat model from what is installed: not an embedding or image model, and the
  *  SMALLEST one of at least 3B (big models are slow on most machines; under ~3B they roleplay
  *  poorly). Null when nothing clearly qualifies — better to ask than to guess. */
-export function suggestChatModel(installed: string[]): string | null {
+export function suggestChatModel(installed: string[], sizes?: Record<string, number>): string | null {
   const sized = installed
     .filter((m) => !NOT_CHAT.test(m))
-    .map((m) => ({ m, b: paramBillions(m) }))
+    .map((m) => ({ m, b: paramBillions(m) ?? sizes?.[m] ?? null }))
     .filter((x): x is { m: string; b: number } => x.b !== null && x.b >= 3);
   if (sized.length === 0) return null;
   sized.sort((x, y) => x.b - y.b);

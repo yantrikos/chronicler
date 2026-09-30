@@ -1,7 +1,7 @@
 // Model lists for Ollama, OpenAI-compatible servers (vLLM, llama.cpp/Vulkan, LM Studio…), Anthropic and Gemini.
 // Run: npx tsx tests/list-models.test.ts
 
-import { listModels, modelListRequest, parseModelList } from "../src/lib/providers/list-models";
+import { listModels, modelListRequest, parseModelList, parseParamSize } from "../src/lib/providers/list-models";
 
 function check(cond: boolean, msg: string): void {
   if (!cond) {
@@ -29,6 +29,10 @@ async function main(): Promise<void> {
   const gem = parseModelList("gemini", { models: [{ name: "models/gemini-2.0-flash", supportedGenerationMethods: ["generateContent"] }, { name: "models/embedding-001", supportedGenerationMethods: ["embedContent"] }] });
   check(gem.length === 1 && gem[0].id === "gemini-2.0-flash", "Gemini: strips 'models/' and keeps only models that can generate text");
   check(parseModelList("ollama", null).length === 0 && parseModelList("openai-compat", {}).length === 0, "garbage in -> empty list, no crash");
+
+  check(parseParamSize("27.3B") === 27.3 && parseParamSize("800M") === 0.8 && parseParamSize("4.3b") === 4.3 && parseParamSize("huge") === undefined && parseParamSize(undefined) === undefined, "parameter sizes like 27.3B / 800M are read");
+  const withSize = parseModelList("ollama", { models: [{ name: "qwen3.8:latest", size: 17.7e9, details: { parameter_size: "27.3B" } }, { name: "yantrik:latest", details: {} }] });
+  check(withSize.find((m) => m.id === "qwen3.8:latest")?.billions === 27.3 && withSize.find((m) => m.id === "yantrik:latest")?.billions === undefined, "Ollama's reported parameter size is kept per model, even for :latest tags");
 
   console.log("--- modelListRequest ---");
   check(modelListRequest("ollama", "http://h:11434/v1", "")?.url === "http://h:11434/api/tags", "Ollama: the /v1 suffix is normalised to the host root");

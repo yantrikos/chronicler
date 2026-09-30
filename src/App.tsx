@@ -95,6 +95,7 @@ import { CoreTraitPromoter } from "./lib/skills/core-trait-promoter";
 import { SelfModelGenerator } from "./lib/identity/self-model-generator";
 import { applyEnactments, ensureEnactments, traitKey } from "./lib/identity/trait-enactment";
 import { NoModelBar, NO_MODEL_MESSAGE } from "./components/Notices/NoModelBar";
+import { LlmGate, gateBackground, gateChat, shouldGate } from "./lib/providers/gate";
 import { loadEnactments, saveEnactments } from "./lib/identity/enactment-store";
 import {
   loadSelfModel,
@@ -334,14 +335,14 @@ function inferTier(
   return "heuristic";
 }
 
-function buildExtractorFromConfig(cfg: ChroniclerConfig): {
+function buildExtractorFromConfig(cfg: ChroniclerConfig, gate?: LlmGate | null): {
   extractor: Extractor;
   provider_label: string;
 } {
   const p = extractionProvider(cfg);
   if (!p || p.kind === "mock")
     return { extractor: new RegexExtractor(), provider_label: "regex-only" };
-  const provider = buildProvider(p);
+  const provider = gate ? gateBackground(buildProvider(p), gate) : buildProvider(p);
   return {
     extractor: new HybridExtractor(new LlmExtractor(provider, p.model)),
     provider_label: p.label,
@@ -809,17 +810,22 @@ function App() {
     transportRef.current = buildTransport(cfg);
     clientRef.current = new YantrikClient(transportRef.current);
     const p = activeProvider(cfg);
-    const provider = p ? buildProvider(p) : new MockProvider();
+    const rawProvider = p ? buildProvider(p) : new MockProvider();
+    // Chat and background work (fact extraction, scene board, ledger, story summary) share one model
+    // server by default. Give chat priority there so a message sent right after a reply isn't stuck
+    // behind background calls — on a big, slow model that wait is most of a minute. See providers/gate.ts.
+    const gate = shouldGate(p, extractionProvider(cfg), isLocalProvider) ? new LlmGate() : null;
+    const provider = gate ? gateChat(rawProvider, gate) : rawProvider;
     providerRef.current = provider;
     modelRef.current = p?.model ?? "mock";
-    extractorRef.current = buildExtractorFromConfig(cfg).extractor;
+    extractorRef.current = buildExtractorFromConfig(cfg, gate).extractor;
 
     // Build a conflict verifier using the extraction provider (small/fast)
     // when configured, falling back to the generation provider. Skip for
     // MockProvider — nothing to verify with against.
     const xp = extractionProvider(cfg);
     if (xp && xp.kind !== "mock") {
-      const vp = buildProvider(xp);
+      const vp = gate ? gateBackground(buildProvider(xp), gate) : buildProvider(xp);
       conflictVerifierRef.current = new ConflictVerifier(vp, xp.model);
       skillFormerRef.current = new SkillFormer(
         clientRef.current,
@@ -846,31 +852,31 @@ function App() {
       ledgerTrackerRef.current = new LedgerTracker(vp, xp.model);
       chronicleWriterRef.current = new ChapterWriter(vp, xp.model);
     } else if (p && p.kind !== "mock") {
-      conflictVerifierRef.current = new ConflictVerifier(provider, p.model);
+      conflictVerifierRef.current = new ConflictVerifier(rawProvider, p.model);
       skillFormerRef.current = new SkillFormer(
         clientRef.current,
-        provider,
+        rawProvider,
         p.model
       );
       driftFormerRef.current = new DriftFormer(
         clientRef.current,
-        provider,
+        rawProvider,
         p.model
       );
       preferenceFormerRef.current = new PreferenceFormer(
         clientRef.current,
-        provider,
+        rawProvider,
         p.model
       );
-      coreTraitVerifierRef.current = new CoreTraitVerifier(provider, p.model);
+      coreTraitVerifierRef.current = new CoreTraitVerifier(rawProvider, p.model);
       coreTraitPromoterRef.current = new CoreTraitPromoter(
         clientRef.current,
         coreTraitVerifierRef.current
       );
-      selfModelGeneratorRef.current = new SelfModelGenerator(provider, p.model);
-      sceneTrackerRef.current = new SceneTracker(provider, p.model);
-      ledgerTrackerRef.current = new LedgerTracker(provider, p.model);
-      chronicleWriterRef.current = new ChapterWriter(provider, p.model);
+      selfModelGeneratorRef.current = new SelfModelGenerator(rawProvider, p.model);
+      sceneTrackerRef.current = new SceneTracker(rawProvider, p.model);
+      ledgerTrackerRef.current = new LedgerTracker(rawProvider, p.model);
+      chronicleWriterRef.current = new ChapterWriter(rawProvider, p.model);
     } else {
       conflictVerifierRef.current = null;
       skillFormerRef.current = null;

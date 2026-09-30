@@ -19,6 +19,16 @@ export interface ModelEntry {
   id: string;
   /** Extra detail worth showing next to the name (size, etc.), if the backend gave any. */
   note?: string;
+  /** Parameter count in billions, when the backend reports it (Ollama does, even for ":latest" tags). */
+  billions?: number;
+}
+
+/** "27.3B" -> 27.3, "800M" -> 0.8, anything else -> undefined. */
+export function parseParamSize(v: unknown): number | undefined {
+  const m = typeof v === "string" ? v.trim().match(/^(\d+(?:\.\d+)?)\s*([BM])$/i) : null;
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  return m[2].toUpperCase() === "M" ? n / 1000 : n;
 }
 
 export type ModelList = { ok: true; models: ModelEntry[] } | { ok: false; reason: string };
@@ -33,7 +43,11 @@ export function parseModelList(kind: ListKind, data: unknown): ModelEntry[] {
   const arr = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? (v as Array<Record<string, unknown>>) : []);
   let out: ModelEntry[] = [];
   if (kind === "ollama") {
-    out = arr(d.models).map((m) => ({ id: String(m.name ?? ""), note: gb(m.size) }));
+    out = arr(d.models).map((m) => ({
+      id: String(m.name ?? ""),
+      note: gb(m.size),
+      billions: parseParamSize((m.details as Record<string, unknown> | undefined)?.parameter_size),
+    }));
     const ids = new Set(chatModels(out.map((m) => m.id)));
     out = out.filter((m) => ids.has(m.id)); // drop embedding / image models
   } else if (kind === "gemini") {
