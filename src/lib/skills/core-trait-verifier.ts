@@ -9,6 +9,7 @@
 // preference-former. Bias toward rejection on uncertainty — false-positive
 // core traits fossilize incorrectly and require user retcon to remove.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 
 export interface CoreTraitCandidate {
@@ -157,7 +158,7 @@ Respond with strict JSON only.`;
         system: VERIFIER_SYSTEM,
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
-        max_tokens: 4000,
+        max_tokens: limit("bg.core_trait_verify"),
       });
       const parsed = parseStrictJson(resp.content);
       if (!parsed || typeof parsed !== "object") return defaultReject;

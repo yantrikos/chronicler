@@ -4,6 +4,7 @@
 //   3. send to LLM
 //   4. write post-turn
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { YantrikClient } from "../yantrikdb/client";
 import { withAntiConfabulation } from "./anti-confabulation";
@@ -264,7 +265,7 @@ export class Orchestrator {
       model: this.deps.model,
       system: rendered.system,
       messages: rendered.history,
-      max_tokens: this.deps.maxResponseTokens ?? 1024,
+      max_tokens: this.deps.maxResponseTokens ?? limit("reply.default_tokens"),
       sampling: this.deps.sampling,
       signal: opts?.signal,
     };

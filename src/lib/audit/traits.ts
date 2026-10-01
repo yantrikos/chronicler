@@ -7,6 +7,7 @@
 // layer has crystallised. It therefore works even if the identity layer never
 // fills, and the player can edit the list before auditing.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 
 const SYSTEM = `You turn a roleplay character's description into a short list of CHECKABLE behavioral traits — things a reply could clearly violate.
@@ -23,7 +24,7 @@ export async function extractDeclaredTraits(provider: LlmProvider, model: string
       model,
       system: SYSTEM,
       messages: [{ role: "user", content: `CHARACTER: ${name}\n\nDESCRIPTION:\n${description.slice(0, 2500)}\n\nReturn the JSON.` }],
-      max_tokens: 300,
+      max_tokens: limit("bg.audit_traits"),
       temperature: 0.1,
     });
     return parseTraits(resp.content);

@@ -64,8 +64,8 @@ async function stop(): Promise<void> {
   p.kill();
   await new Promise((r) => p.once("exit", r));
 }
-const post = (path: string, signal?: AbortSignal) =>
-  fetch(`${BASE}/api/llm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target_url: `http://127.0.0.1:${UP_PORT}${path}`, method: "POST", headers: {}, body: {} }), signal });
+const post = (path: string, signal?: AbortSignal, extra: Record<string, unknown> = {}) =>
+  fetch(`${BASE}/api/llm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target_url: `http://127.0.0.1:${UP_PORT}${path}`, method: "POST", headers: {}, body: {}, ...extra }), signal });
 
 /** Read the whole body; report what arrived and whether the stream ended cleanly. */
 async function drain(res: Response): Promise<{ tokens: number; clean: boolean; sawDone: boolean }> {
@@ -113,6 +113,22 @@ async function main(): Promise<void> {
   ctl.abort();
   await sleep(1500);
   check(upstreamClosed, "the upstream request is cancelled, so Ollama stops generating instead of finishing a reply nobody will read");
+
+  console.log("--- timeouts chosen in Settings travel with the request ---");
+  await stop();
+  await start({ CHRONICLER_LLM_TIMEOUT_MS: "20000", CHRONICLER_LLM_IDLE_MS: "20000" });
+  const t1 = Date.now();
+  const tooSoon = await post("/lead?s=8", undefined, { first_byte_ms: 6000 });
+  const tooSoonBody = await tooSoon.json().catch(() => ({}));
+  check(tooSoon.status === 502 && /no response from the model after 6s/.test(String((tooSoonBody as { error?: string }).error)) && Date.now() - t1 < 9000, "a first-word timeout of 6s from the browser beats the server's 20s setting");
+  const patient = await drain(await post("/lead?s=6", undefined, { first_byte_ms: 15000 }));
+  check(patient.tokens === 2 && patient.sawDone, "and a longer one lets a slow start finish");
+  const t2 = Date.now();
+  const clamped = await post("/lead?s=9", undefined, { first_byte_ms: 10 });
+  const clampedBody = await clamped.json().catch(() => ({}));
+  check(clamped.status === 502 && /after 5s/.test(String((clampedBody as { error?: string }).error)) && Date.now() - t2 < 8000, "an absurdly small value is clamped to 5s rather than failing every call instantly");
+  const junk = await drain(await post("/steady?n=2", undefined, { first_byte_ms: "soon", idle_ms: -1 }));
+  check(junk.tokens === 2 && junk.sawDone, "a non-numeric or negative value is ignored (the server's setting applies)");
 
   await stop();
   upstream.close();

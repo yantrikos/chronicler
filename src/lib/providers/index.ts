@@ -9,6 +9,7 @@
 // The server translates { target_url, method, headers, body } into a real
 // upstream call and streams the response back (SSE passes through).
 
+import { limit, limitOverride } from "../limits";
 import { providerHttpError } from "./errors";
 import { emptyReplyMessage, guessThinkingStyle, ollamaThinkOff, openAiThinkingFields, type ThinkingStyle } from "./thinking";
 
@@ -159,6 +160,10 @@ export interface ProxyFetchOpts {
 }
 
 export async function proxyFetch(opts: ProxyFetchOpts): Promise<Response> {
+  // The two timeouts are sent only when the user changed them (Settings → Advanced → Timeouts);
+  // otherwise the server applies its own setting (CHRONICLER_LLM_TIMEOUT_MS / _IDLE_MS).
+  const firstByte = limitOverride("proxy.first_byte_s");
+  const idle = limitOverride("proxy.idle_s");
   return fetch(PROXY_ENDPOINT, {
     signal: opts.signal,
     method: "POST",
@@ -168,6 +173,8 @@ export async function proxyFetch(opts: ProxyFetchOpts): Promise<Response> {
       method: opts.method ?? "POST",
       headers: opts.headers ?? {},
       body: opts.body,
+      ...(firstByte !== undefined ? { first_byte_ms: firstByte * 1000 } : {}),
+      ...(idle !== undefined ? { idle_ms: idle * 1000 } : {}),
     }),
   });
 }
@@ -255,7 +262,7 @@ export class OpenAICompatProvider implements LlmProvider {
       ],
       temperature: s.temperature ?? req.temperature ?? 0.9,
       top_p: s.top_p,
-      max_tokens: req.max_tokens ?? 1024,
+      max_tokens: req.max_tokens ?? limit("reply.default_tokens"),
       ...(streaming ? { stream: true } : {}),
       // OpenAI-style tool calling. Most providers (OpenAI, Ollama,
       // OpenRouter, nano-gpt, Anthropic-via-compat) honor this; ones
@@ -363,7 +370,7 @@ export class OpenAICompatProvider implements LlmProvider {
       },
       st
     );
-    assertReply(this.label, st, req.max_tokens ?? 1024);
+    assertReply(this.label, st, req.max_tokens ?? limit("reply.default_tokens"));
   }
 }
 
@@ -378,7 +385,9 @@ export class OllamaProvider implements LlmProvider {
   constructor(
     private baseUrl: string,
     private label = "ollama",
-    private disableThinking = false
+    private disableThinking = false,
+    /** Context window to request (Ollama `num_ctx`); undefined = the server's default. */
+    private contextWindow?: number
   ) {
     this.name = label;
   }
@@ -405,7 +414,8 @@ export class OllamaProvider implements LlmProvider {
         top_k: s.top_k,
         min_p: s.min_p,
         repeat_penalty: s.repetition_penalty,
-        num_predict: req.max_tokens ?? 1024,
+        num_predict: req.max_tokens ?? limit("reply.default_tokens"),
+        ...(this.contextWindow ? { num_ctx: this.contextWindow } : {}),
       },
     };
   }
@@ -475,7 +485,7 @@ export class OllamaProvider implements LlmProvider {
         }
       }
     }
-    assertReply(this.label, st, req.max_tokens ?? 1024);
+    assertReply(this.label, st, req.max_tokens ?? limit("reply.default_tokens"));
   }
 }
 
@@ -494,7 +504,7 @@ export class AnthropicProvider implements LlmProvider {
       model: req.model,
       system: req.system,
       messages: req.messages.map((m) => ({ role: m.role, content: anthropicContent(m) })),
-      max_tokens: req.max_tokens ?? 1024,
+      max_tokens: req.max_tokens ?? limit("reply.default_tokens"),
       temperature: s.temperature ?? req.temperature ?? 0.9,
       top_p: s.top_p,
       top_k: s.top_k,
@@ -556,7 +566,7 @@ export class AnthropicProvider implements LlmProvider {
       }
       return undefined;
     });
-    assertReply("Anthropic", st, req.max_tokens ?? 1024);
+    assertReply("Anthropic", st, req.max_tokens ?? limit("reply.default_tokens"));
   }
 }
 
@@ -594,7 +604,7 @@ export class GeminiProvider implements LlmProvider {
         temperature: s.temperature ?? req.temperature ?? 0.9,
         topP: s.top_p,
         topK: s.top_k,
-        maxOutputTokens: req.max_tokens ?? 1024,
+        maxOutputTokens: req.max_tokens ?? limit("reply.default_tokens"),
       },
     };
   }

@@ -1,3 +1,4 @@
+import { limit, setLimitOverrides } from "./lib/limits";
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { ChatPane } from "./components/Chat/ChatPane";
@@ -277,7 +278,8 @@ function buildProvider(p: ProviderConfigEntry): LlmProvider {
     return new OllamaProvider(
       p.base_url ?? "http://host.docker.internal:11434",
       p.label,
-      p.disable_thinking ?? false
+      p.disable_thinking ?? false,
+      p.context_window
     );
   if (p.kind === "openai-compat")
     return new OpenAICompatProvider(
@@ -805,6 +807,7 @@ function App() {
   }, [characters.map((c) => c.id).join(","), sessionId]);
 
   function rebuildRuntime(cfg: ChroniclerConfig) {
+    setLimitOverrides(cfg.limits); // the limits in Settings → Advanced, applied on load and on every save
     const prev = transportRef.current;
     if (prev instanceof McpTransport) prev.close().catch(() => undefined);
     transportRef.current = buildTransport(cfg);
@@ -3557,7 +3560,7 @@ function App() {
               (history || "(no prior turns yet — open the scene)"),
           },
         ],
-        max_tokens: 200,
+        max_tokens: limit("reply.impersonate_tokens"),
         sampling: samplingRef.current,
       });
       return reply.content.trim();

@@ -21,6 +21,7 @@
 //   2. Reject signals with <2 distinct canon memories of evidence —
 //      single-data-point "drift" is just one interaction.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { YantrikClient } from "../yantrikdb/client";
 import type { RecallResult } from "../yantrikdb/client";
@@ -186,7 +187,7 @@ Classify any relationship drift toward ${c.target_label ?? c.target}. Default to
         system: VERIFIER_SYSTEM,
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
-        max_tokens: 360,
+        max_tokens: limit("bg.drift"),
       });
       const parsed = parseStrictJson(resp.content);
       if (!parsed) throw new Error("non-JSON verifier output");

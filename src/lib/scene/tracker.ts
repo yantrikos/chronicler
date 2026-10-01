@@ -3,6 +3,7 @@
 // by applyDelta, so a bad answer degrades to "no change" rather than to a
 // corrupted board.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import { applyDelta, parseSceneDelta, renderSceneStatus, type SceneState } from "./state";
 import { splitOoc } from "../orchestrator/ooc";
@@ -151,7 +152,7 @@ ${this.mode === "board" ? "Return the complete updated board as JSON." : "Return
         model: this.model,
         system: this.mode === "board" ? SYSTEM_BOARD : SYSTEM,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 300,
+        max_tokens: limit("bg.scene_board"),
         temperature: 0.1,
       });
       const delta = parseSceneDelta(resp.content);

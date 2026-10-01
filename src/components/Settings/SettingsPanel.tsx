@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { BackgroundModelHint } from "./BackgroundModelHint";
+import { AdvancedLimits } from "./AdvancedLimits";
+import { limitFrom } from "../../lib/limits";
 import { guessThinkingStyle } from "../../lib/providers/thinking";
 import {
   type ChroniclerConfig,
@@ -468,9 +470,25 @@ export function SettingsPanel({
                       )}
                       <details className="pt-1">
                         <summary className="text-[11px] text-neutral-400 cursor-pointer hover:text-neutral-200">
-                          sampling (optional)
+                          sampling &amp; limits (advanced)
                         </summary>
                         <div className="grid grid-cols-2 gap-1.5 mt-2">
+                          <NumInput
+                            label="max reply tokens"
+                            value={p.max_response_tokens}
+                            onChange={(v) => updateProvider(p.id, { max_response_tokens: v })}
+                            placeholder={String(limitFrom(draft.limits, "reply.default_tokens"))}
+                            step={64}
+                          />
+                          {p.kind === "ollama" && (
+                            <NumInput
+                              label="context window (num_ctx)"
+                              value={p.context_window}
+                              onChange={(v) => updateProvider(p.id, { context_window: v })}
+                              placeholder="server default"
+                              step={1024}
+                            />
+                          )}
                           <NumInput
                             label="temperature"
                             value={p.temperature}
@@ -513,6 +531,12 @@ export function SettingsPanel({
                             </>
                           )}
                         </div>
+                        {p.kind === "ollama" && p.context_window !== undefined &&
+                          limitFrom(draft.limits, "prompt.total_tokens") + (p.max_response_tokens ?? limitFrom(draft.limits, "reply.default_tokens")) > p.context_window && (
+                            <p className="mt-1.5 text-[11px] leading-relaxed text-amber-300" role="status">
+                              ⚠ The prompt budget ({limitFrom(draft.limits, "prompt.total_tokens")}) plus the reply ({p.max_response_tokens ?? limitFrom(draft.limits, "reply.default_tokens")}) is more than this context window ({p.context_window}). Older text will be cut off — raise the window or lower those.
+                            </p>
+                          )}
                       </details>
                     </div>
                   )}
@@ -520,6 +544,10 @@ export function SettingsPanel({
               ))}
             </div>
           </div>
+        </section>
+
+        <section className="px-5 py-4 border-t border-neutral-800">
+          <AdvancedLimits value={draft} onChange={setDraft} />
         </section>
 
         {mcpRegistry && (

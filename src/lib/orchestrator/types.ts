@@ -1,5 +1,6 @@
 // Orchestrator types — the policy layer between chat UI and YantrikDB.
 
+import { limit } from "../limits";
 import type { RecallResult, Tier } from "../yantrikdb/types";
 
 /** An image the player shared. The bytes live in IndexedDB (never in the turn,
@@ -168,17 +169,18 @@ export interface WriteClassification {
   canon: string[]; // user-declared truths (e.g. "remember that X")
 }
 
-export const DEFAULT_TOKEN_BUDGET: TokenBudget = {
-  // 4096 picked to fit the default context window of qwen3.5:4b and similar
-  // small local models. Users on larger-context models can bump this in the
-  // orchestrator constructor. Scene/canon percentages tuned to keep prompt
-  // eval time predictable even after many turns of accumulated history.
-  total: 4000,
-  canon_pct: 0.4,
-  scene_pct: 0.25,
-  heuristic_pct: 0.2,
-  graph_pct: 0.1,
-};
+/** The prompt budget in effect: the registry's values (Settings → Advanced → Prompt budget), which default to
+ *  4000 tokens split 40/25/20/10 across canon / scene / inferred facts / relationships. 4000 suits the default
+ *  context window of small local models; raise it for models with a larger one. */
+export function defaultTokenBudget(): TokenBudget {
+  return {
+    total: limit("prompt.total_tokens"),
+    canon_pct: limit("prompt.canon_pct"),
+    scene_pct: limit("prompt.scene_pct"),
+    heuristic_pct: limit("prompt.heuristic_pct"),
+    graph_pct: limit("prompt.graph_pct"),
+  };
+}
 
 export const TIER_INJECTION_LABELS: Record<Tier, string> = {
   canon: "<canon>",

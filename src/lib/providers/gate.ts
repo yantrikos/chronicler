@@ -17,6 +17,7 @@
 // model or a hosted API has no queue to jump, so nothing changes there.
 
 import type { ProviderConfigEntry } from "../config";
+import { limit } from "../limits";
 import type { ChatRequest, ChatResponse, LlmProvider } from "./index";
 
 /** The abort reason for "chat needs the model"; anything else that aborts is the caller's own. */
@@ -29,8 +30,8 @@ export class LlmGate {
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
-    private idleMs = 1500,
-    private maxYields = 3
+    private idleMs = limit("gate.quiet_ms"),
+    private maxYields = limit("gate.max_retries")
   ) {}
 
   /** A chat request is in flight (or its quiet moment hasn't passed). */

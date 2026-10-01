@@ -15,6 +15,7 @@
 // template would work for trigger classification, personality drift
 // confirmation, procedural pattern validation, etc.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 
 export interface ConflictCandidate {
@@ -112,7 +113,7 @@ export class ConflictVerifier {
         system: SYSTEM,
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
-        max_tokens: 120,
+        max_tokens: limit("bg.conflict_check"),
       });
       const parsed = parseStrictJson(resp.content);
       if (!parsed) throw new Error("non-JSON verifier response");

@@ -2,6 +2,7 @@
 // Run: npx tsx tests/provider-empty-reply.test.ts
 
 import { OllamaProvider, OpenAICompatProvider } from "../src/lib/providers";
+import { setLimitOverrides } from "../src/lib/limits";
 
 function check(cond: boolean, msg: string): void {
   if (!cond) {
@@ -60,6 +61,24 @@ async function main(): Promise<void> {
   check(sent.think === "low", "thinking off on gpt-oss -> its lowest level (it ignores false)");
   await collect(new OllamaProvider("http://h:11434", "Ollama", false).stream(REQ));
   check(!("think" in sent), "thinking left on -> nothing is sent");
+
+  console.log("--- limits reach the request ---");
+  stub(nd({ message: { content: "x" } }, { done: true, done_reason: "stop" }));
+  const opts = () => sent.options as Record<string, unknown>;
+  await collect(new OllamaProvider("http://h:11434", "Ollama", false, 8192).stream(REQ));
+  check(opts().num_ctx === 8192, "a provider's context window is sent to Ollama as num_ctx");
+  await collect(new OllamaProvider("http://h:11434", "Ollama", false).stream(REQ));
+  check(!("num_ctx" in opts()), "with none set, num_ctx is left to the server (behaviour unchanged)");
+  const noMax = { ...REQ } as Record<string, unknown>;
+  delete noMax.max_tokens;
+  await collect(new OllamaProvider("http://h:11434", "Ollama").stream(noMax as unknown as typeof REQ));
+  check(opts().num_predict === 1024, "with no reply length set anywhere, the default (1024) is used");
+  setLimitOverrides({ "reply.default_tokens": 333 });
+  await collect(new OllamaProvider("http://h:11434", "Ollama").stream(noMax as unknown as typeof REQ));
+  check(opts().num_predict === 333, "Settings → Advanced → reply length changes that default");
+  await collect(new OllamaProvider("http://h:11434", "Ollama").stream({ ...REQ, max_tokens: 150 }));
+  check(opts().num_predict === 150, "and a provider's own max reply tokens wins over it");
+  setLimitOverrides(undefined);
 
   console.log("--- OpenAI-compatible (Ollama /v1, vLLM, llama.cpp…) ---");
   stub(sse({ choices: [{ delta: { reasoning: "thinking ".repeat(400) } }] }, { choices: [{ delta: {}, finish_reason: "length" }] }, "[DONE]"));

@@ -3,7 +3,7 @@
 // See Saga task #9.
 
 import type { ChatTurn, ComposedContext, TokenBudget, TokenUsage } from "./types";
-import { DEFAULT_TOKEN_BUDGET } from "./types";
+import { defaultTokenBudget } from "./types";
 import type { RetrievalResult, SurfacedSkill } from "./pipeline";
 import type { RecallResult } from "../yantrikdb/types";
 import { findOverusedPhrases } from "./anti-slop";
@@ -39,7 +39,7 @@ export function composeContext(
   budgetOverride?: Partial<TokenBudget>,
   options?: ComposeOptions
 ): ComposedContext {
-  const token_budget: TokenBudget = { ...DEFAULT_TOKEN_BUDGET, ...budgetOverride };
+  const token_budget: TokenBudget = { ...defaultTokenBudget(), ...budgetOverride };
   const canonBudget = Math.floor(token_budget.total * token_budget.canon_pct);
   const sceneBudget = Math.floor(token_budget.total * token_budget.scene_pct);
   const heuristicBudget = Math.floor(token_budget.total * token_budget.heuristic_pct);

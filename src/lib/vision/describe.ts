@@ -11,6 +11,7 @@
 //  • if it can't describe, say so with an exact sentinel, so a refusal
 //    paragraph is never injected as fiction.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 
 export const CANNOT_DESCRIBE = "[[cannot describe]]";
@@ -85,7 +86,7 @@ export class VisionDescriber {
         model: this.model,
         system: SYSTEM,
         messages: [{ role: "user", content: `Describe this image.${ctx}`, images: [input.image] }],
-        max_tokens: 320,
+        max_tokens: limit("bg.vision_describe"),
         temperature: 0.2,
       });
       return cleanDescription(resp.content);

@@ -5,6 +5,7 @@
 // preferences. Periodic refresh: weekly OR when inputs hash changes
 // >20%. Manual refresh triggered from the identity inspector.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type {
   SelfModel,
@@ -152,7 +153,7 @@ export class SelfModelGenerator {
         system: GENERATOR_SYSTEM,
         messages: [{ role: "user", content: HUMAN_PROMPT_TEMPLATE(inputs) }],
         temperature: 0.6,
-        max_tokens: 4000,
+        max_tokens: limit("bg.self_model"),
       });
       const body = (reply.content ?? "").trim();
       if (!body || !validateFirstPerson(body)) return null;

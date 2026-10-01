@@ -2,6 +2,25 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.5] — 2026-09-30 — Limits you can change
+
+Nothing that caps a model call should be a number buried in the code. They are now one registry, editable in Settings.
+
+### Added
+- **Settings → Advanced — limits.** 28 limits, each with its default, an explanation and an allowed range; leave a field empty to use the default, reset one or all, and
+  out-of-range values are corrected with a note. Groups: *Replies* (default reply length, "write for me" length), *Prompt budget* (the 4,000 tokens of memory and scene text per prompt
+  and how they are shared), *Background tasks* (the most tokens each of 17 background calls may write — fact extraction, scene board, ledger, story summary, recap, contradiction check,
+  drift, patterns, preferences, trait checks, self-model, audits, image descriptions), *Timeouts* (wait for a model's first word; how long a stream may go silent), *Scheduling*.
+- **Per-provider reply length and context window.** *Settings → Providers → sampling & limits*: **max reply tokens** (the setting existed in the config and the code's own comment said it
+  was in Settings, but there was no field for it) and, for Ollama, **context window** (`num_ctx`). A warning appears when the prompt budget plus reply length will not fit the window.
+
+### Changed
+- Every default is exactly the value that used to be hard-coded, so nothing behaves differently until you change a field. Timeouts chosen in Settings travel with each request (clamped to
+  5 s – 2 h); if you set none, the server's own settings still apply.
+- A test now fails if a numeric token limit is written into the code again.
+
+---
+
 ## [0.6.4] — 2026-09-30 — Your next message goes first
 
 Fixes "a big model is slow with Chronicler" — the model's own speed is what it is, but Chronicler was making it feel much slower.

@@ -27,19 +27,17 @@ export interface ProviderConfigEntry {
   top_k?: number;
   min_p?: number;
   repetition_penalty?: number;
-  /** Max tokens the model is allowed to generate per reply. Unset
-   *  falls back to DEFAULT_MAX_RESPONSE_TOKENS. The previous hardcoded
-   *  420 cut long-form prose mid-sentence; the default is now 1024,
-   *  enough for ~750 words. Users running tiny local models (or who
-   *  prefer terse replies) can lower it per-provider in Settings. */
+  /** Max tokens the model is allowed to generate per reply. Unset falls back to the
+   *  "reply.default_tokens" limit (1024, ~750 words — see lib/limits.ts). Set per provider in
+   *  Settings → Providers → "max reply tokens". */
   max_response_tokens?: number;
+  /** Ollama only: the context window to request (`num_ctx`). Unset = the server's own default, which
+   *  varies by Ollama version and model and can silently truncate a long prompt. */
+  context_window?: number;
   /** Whether this model can read images. Auto-detected for Ollama (its
    *  /api/show lists a "vision" capability); set by hand for other kinds. */
   supports_vision?: boolean;
 }
-
-/** Default cap on a single LLM reply. ~750 words. */
-export const DEFAULT_MAX_RESPONSE_TOKENS = 1024;
 
 export interface UserPersona {
   /** Stable id used by SessionMeta.persona_id + ChroniclerConfig.active_persona_id.
@@ -55,6 +53,8 @@ export interface ChroniclerConfig {
   yantrikdb: YantrikConfig;
   active_provider_id?: string;
   extraction_provider_id?: string;
+  /** Overrides for the tunable limits in lib/limits.ts (Settings → Advanced). A missing key uses its default. */
+  limits?: Record<string, number>;
   /** Provider per role. Only `vision` is written here today; `chat` and
    *  `background` are still the two legacy fields above, which Settings edits
    *  — so providerForRole reads roles.chat/background first but nothing sets

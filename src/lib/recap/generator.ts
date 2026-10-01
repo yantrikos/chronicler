@@ -2,6 +2,7 @@
 // Pulls from: last session summary, top N canon facts for active
 // character/world, unresolved conflicts, pending temporal triggers.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { YantrikClient } from "../yantrikdb/client";
 import { ns } from "../yantrikdb/types";
@@ -94,7 +95,7 @@ Write the recap now. Remember: only restate what is above, and keep subjects str
     model: input.model,
     system,
     messages: [{ role: "user", content: prompt }],
-    max_tokens: 240,
+    max_tokens: limit("bg.recap"),
     temperature: 0.3,
   });
 

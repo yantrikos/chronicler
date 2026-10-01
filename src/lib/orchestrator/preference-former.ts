@@ -22,6 +22,7 @@
 // existing preferences in the substrate, write new candidates with
 // pre_activation=true.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { YantrikClient } from "../yantrikdb/client";
 import type { RecallResult } from "../yantrikdb/client";
@@ -244,7 +245,7 @@ Extract preferences and respond with JSON immediately. Do NOT analyze memories o
         // headroom even when the model wants to enumerate every input
         // memory. The lenient JSON parser will find the {...} block
         // wherever it lands (content field or reasoning field).
-        max_tokens: 8000,
+        max_tokens: limit("bg.preference_former"),
       });
       const parsed = parseStrictJson(resp.content);
       if (!parsed || !Array.isArray(parsed.items)) {

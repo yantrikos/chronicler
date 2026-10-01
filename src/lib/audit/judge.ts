@@ -9,6 +9,7 @@
 //     change of tone for the moment.
 // Treat the output as a list of things to look at, not a verdict.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 
 export interface Flag {
@@ -85,7 +86,7 @@ export class ConsistencyJudge {
         model: this.model,
         system: SYSTEM,
         messages: [{ role: "user", content: `CHARACTER: ${characterName}\n\nESTABLISHED TRAITS:\n${list}\n\nREPLY TO CHECK:\n${reply.trim()}\n\nReturn the JSON.` }],
-        max_tokens: 300,
+        max_tokens: limit("bg.audit_judge"),
         temperature: 0,
       });
       // Numbers in the group are 1-based within it; map back to the full list.

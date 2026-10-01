@@ -2,6 +2,7 @@
 // the exchange may contain a deed, so it costs nothing on ordinary chatter.
 // Never throws: on any failure the ledger is returned unchanged.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import { splitOoc } from "../orchestrator/ooc";
 import { isGrounded } from "./tracker";
@@ -57,7 +58,7 @@ Return the JSON.`;
         model: this.model,
         system: SYSTEM,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 300,
+        max_tokens: limit("bg.ledger"),
         temperature: 0.1,
       });
       const delta = parseLedgerDelta(resp.content);

@@ -18,6 +18,7 @@
 //
 // Saga task #42. Companion: skill-outcomes.ts handles the +1/-1 loop.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { YantrikClient } from "../yantrikdb/client";
 
@@ -167,7 +168,7 @@ Classify. Default to is_skill: false when uncertain.`;
         system: VERIFIER_SYSTEM,
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
-        max_tokens: 300,
+        max_tokens: limit("bg.skill_former"),
       });
       const parsed = parseStrictJson(resp.content);
       if (!parsed) throw new Error("verifier returned non-JSON");

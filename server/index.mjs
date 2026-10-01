@@ -163,6 +163,11 @@ async function proxyLlm(req, res) {
     return;
   }
   const { target_url, method = "POST", headers = {}, body } = payload;
+  // The browser may carry the person's own timeouts (Settings → Advanced). Clamped so a bad or hostile
+  // value cannot pin a connection open forever or make every call fail instantly.
+  const clampMs = (v, fallback, lo, hi) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+  const firstByteMs = clampMs(payload.first_byte_ms, LLM_TIMEOUT_MS, 5_000, 7_200_000);
+  const idleMs = clampMs(payload.idle_ms, LLM_IDLE_MS, 5_000, 3_600_000);
   if (typeof target_url !== "string" || !/^https?:\/\//.test(target_url)) {
     res.writeHead(400, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "target_url required (http(s) URL)" }));
@@ -183,7 +188,7 @@ async function proxyLlm(req, res) {
       controller.abort();
     }, ms);
   };
-  arm(LLM_TIMEOUT_MS, `no response from the model after ${Math.round(LLM_TIMEOUT_MS / 1000)}s`);
+  arm(firstByteMs, `no response from the model after ${Math.round(firstByteMs / 1000)}s`);
   // The browser went away (Stop pressed, tab closed): cancel the upstream request so Ollama stops
   // generating instead of finishing a reply nobody will read — and blocking the next one.
   res.on("close", () => {
@@ -224,12 +229,12 @@ async function proxyLlm(req, res) {
   );
   if (upstream.body) {
     const reader = upstream.body.getReader();
-    arm(LLM_IDLE_MS, `the model went silent for ${Math.round(LLM_IDLE_MS / 1000)}s mid-reply`);
+    arm(idleMs, `the model went silent for ${Math.round(idleMs / 1000)}s mid-reply`);
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        arm(LLM_IDLE_MS, `the model went silent for ${Math.round(LLM_IDLE_MS / 1000)}s mid-reply`);
+        arm(idleMs, `the model went silent for ${Math.round(idleMs / 1000)}s mid-reply`);
         res.write(Buffer.from(value));
       }
     } catch (err) {

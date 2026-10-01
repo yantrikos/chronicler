@@ -2,6 +2,7 @@
 // and fold very old chapters together. Never throws — on any failure the caller
 // keeps what it had and tries again later.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import { narrateUserTurn } from "../vision/narrate";
 import { isDirectiveOnly } from "../orchestrator/ooc";
@@ -72,7 +73,7 @@ export class ChapterWriter {
         model: this.model,
         system: CHAPTER_SYSTEM,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 260,
+        max_tokens: limit("bg.chronicle_chapter"),
         temperature: 0.2,
       });
       const chapter = cleanChapter(resp.content);
@@ -90,7 +91,7 @@ export class ChapterWriter {
         model: this.model,
         system: MERGE_SYSTEM,
         messages: [{ role: "user", content: `CHAPTERS, oldest first:\n${texts.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nWrite the condensed paragraph.` }],
-        max_tokens: 300,
+        max_tokens: limit("bg.chronicle_merge"),
         temperature: 0.2,
       });
       const out = cleanChapter(resp.content);

@@ -8,6 +8,7 @@
 // block the user's reply. On GPT-5.4-mini / Haiku 4.5 this is ~200-400ms
 // and ~$0.001/turn.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { Character, ChatTurn } from "./types";
 
@@ -154,7 +155,7 @@ Extract now, attributing every fact to ${userName} or ${characterName} explicitl
       system,
       messages: [{ role: "user", content: user }],
       temperature: 0,
-      max_tokens: 600,
+      max_tokens: limit("bg.extract"),
     });
 
     return sanitizeExtraction(parseExtraction(resp.content));

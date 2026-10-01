@@ -2,6 +2,7 @@
 // hook/command invocation. This is the enforcement boundary for the SDK
 // permission model.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 import type { YantrikClient } from "../yantrikdb/client";
 import {
@@ -91,7 +92,7 @@ export function buildApi(
             content: m.content,
           })),
           temperature: req.temperature,
-          max_tokens: req.max_tokens ?? 1024,
+          max_tokens: req.max_tokens ?? limit("reply.default_tokens"),
         });
         return { content: reply.content };
       },

@@ -14,6 +14,7 @@
 // before offering words" for "reads the room before she speaks"). Any failure
 // returns null and the caller keeps the original trait.
 
+import { limit } from "../limits";
 import type { LlmProvider } from "../providers";
 
 const SYSTEM = `You restate ONE character trait as what the character concretely DOES on the page.
@@ -75,7 +76,7 @@ async function isFaithful(provider: LlmProvider, model: string, trait: string, e
       model,
       system: VERIFY_SYSTEM,
       messages: [{ role: "user", content: `Trait: "${trait.trim()}"\nRewrite: "${enact}"\n\nReturn the JSON.` }],
-      max_tokens: 60,
+      max_tokens: limit("bg.trait_check"),
       temperature: 0,
     });
     const text = resp.content.replace(/<think>[\s\S]*?<\/think>/gi, "");
@@ -95,7 +96,7 @@ export async function enactTrait(provider: LlmProvider, model: string, name: str
       model,
       system: SYSTEM,
       messages: [{ role: "user", content: `Name: ${name}\nTrait: "${trait.trim()}"\n\nReturn the JSON.` }],
-      max_tokens: 200,
+      max_tokens: limit("bg.trait_enact"),
       temperature: 0,
     });
     const enact = parseEnactment(resp.content, trait, name);
