@@ -22,6 +22,12 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          # Pinned: the unpinned default pulls whatever `latest` is on the day, and a newer QEMU
+          # intermittently crashed `npm install` in the emulated arm64 build
+          # ("qemu: uncaught target signal 4 (Illegal instruction)", exit code 132).
+          image: tonistiigi/binfmt:qemu-v8.1.5
+          platforms: arm64
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -64,6 +70,12 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          # Pinned: the unpinned default pulls whatever `latest` is on the day, and a newer QEMU
+          # intermittently crashed `npm install` in the emulated arm64 build
+          # ("qemu: uncaught target signal 4 (Illegal instruction)", exit code 132).
+          image: tonistiigi/binfmt:qemu-v8.1.5
+          platforms: arm64
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
