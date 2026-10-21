@@ -4,7 +4,7 @@
 
 [![Docker images](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/orgs/yantrikos/packages)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-27%2F27%20green-brightgreen)](#develop)
+[![Tests](https://img.shields.io/badge/tests-53%2F53%20green-brightgreen)](#develop)
 
 Chronicler is an open-source, self-hosted **AI roleplay and character-chat app** you run on your own machine with `docker compose up`. It imports the community **v2/v3 character card** format (chub.ai-compatible), talks to **any OpenAI-compatible LLM** — Ollama, OpenAI, Anthropic, OpenRouter, llama.cpp, vLLM, nano-gpt — and remembers what matters about every character across every session, automatically and locally, without sending anything to a cloud.
 
@@ -210,7 +210,7 @@ chronicler/
     ADR-002-memory-conventions.md   the three-tier write contract
     DOGFOOD.md                  pre-launch testing protocol
     PATTERN.md                  the reusable memory pattern (standalone read)
-  tests/                        seven test suites, all required to ship
+  tests/                        53 test suites, all required to ship
 ```
 
 ## Privacy
@@ -242,7 +242,7 @@ npm run dev:server
 # full prod-mode run
 npm run build && npm start
 
-# seven-suite test run (pure TS, no services required)
+# 53-suite test run (pure TS, no services required)
 npm test
 
 # live MCP integration smoke (requires compose stack running)
