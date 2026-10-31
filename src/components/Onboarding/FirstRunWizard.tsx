@@ -197,7 +197,7 @@ export function FirstRunWizard({
                   setProviderModel("gpt-4o-mini");
                 } else if (k === "anthropic") {
                   setProviderUrl("");
-                  setProviderModel("claude-sonnet-4-6");
+                  setProviderModel("claude-sonnet-5-5");
                 }
               }}
               onUrl={setProviderUrl}

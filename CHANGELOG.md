@@ -2,6 +2,32 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.6] — 2026-10-31 — Claude (Anthropic) works
+
+Fixes "I'm using Claude and it fails constantly". Two separate bugs, either of which could do it.
+
+### Fixed
+- **Responses from compressed APIs were unreadable ("Failed to fetch").** Real APIs — Anthropic among them — compress larger JSON replies. Node had already decompressed the body, but
+  Chronicler's server still forwarded the `content-encoding: gzip` header, so the browser tried to decompress plain text and failed; Chrome reports that as a bare "Failed to fetch". It broke the model
+  list and every *non-streaming* call (fact extraction, scene board, ledger…) while small error bodies and uncompressed streams still worked, which is why it looked random. Fixed for the LLM and the
+  memory-database routes; verified failing on the previous server and passing on this one.
+- **Claude rejected the conversation itself.** Anthropic's API requires the first message to be the user's, allows only `user` and `assistant` in `messages`, rejects empty text, and newer models reject
+  `temperature` together with `top_p` and temperatures above 1. A chat that opens with the character's greeting (every demo character), a steering note carried as a system message, an empty turn, or a
+  history that ends on the character were all rejected outright with a 400. Messages are now shaped to fit (a short opener is added in front of a leading greeting; nothing else is dropped except empty turns),
+  and sampling sends temperature (0–1) *or* top_p, never both. If a model still refuses sampling parameters, the call is retried once without them and remembered.
+- **Mid-reply errors from Anthropic** (overloaded, rate limited) arrive as an event after the 200 and were silently ignored; they are now reported by name.
+- A wrong or retired **Claude model name** no longer produces advice to "run `ollama pull`". The default Claude model is now `claude-sonnet-5-5` (the old default may no longer exist), and *load models from
+  this server* lists the names your account accepts. The Anthropic **base URL** is now editable (for gateways and proxies).
+
+### Tests
+- New tests: the real message shapes a chat produces checked against Anthropic's documented rules, and compressed (gzip/brotli) upstream replies through both proxy routes.
+
+### Not verified
+- These were checked against a fake Anthropic server that enforces the documented rules, and against the real `api.anthropic.com` only for its error response (with a dummy key). They have **not** been run with a
+  real API key and a real model.
+
+---
+
 ## [0.6.5] — 2026-09-30 — Limits you can change
 
 Nothing that caps a model call should be a number buried in the code. They are now one registry, editable in Settings.

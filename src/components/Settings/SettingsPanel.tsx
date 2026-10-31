@@ -397,9 +397,9 @@ export function SettingsPanel({
                   </div>
                   {p.kind !== "mock" && (
                     <div className="space-y-1.5">
-                      {(p.kind === "openai-compat" || p.kind === "ollama") && (
+                      {(p.kind === "openai-compat" || p.kind === "ollama" || p.kind === "anthropic") && (
                         <LabeledInput
-                          label="base url"
+                          label={p.kind === "anthropic" ? "base url (optional — empty uses api.anthropic.com)" : "base url"}
                           value={p.base_url ?? ""}
                           onChange={(v) => updateProvider(p.id, { base_url: v })}
                         />

@@ -268,7 +268,7 @@ function isLocalProvider(p: ProviderConfigEntry): boolean {
 }
 
 function buildProvider(p: ProviderConfigEntry): LlmProvider {
-  if (p.kind === "anthropic") return new AnthropicProvider(p.api_key);
+  if (p.kind === "anthropic") return new AnthropicProvider(p.api_key, p.base_url || undefined);
   if (p.kind === "gemini")
     return new GeminiProvider(
       p.api_key,

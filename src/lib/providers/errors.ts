@@ -51,10 +51,11 @@ export function friendlyProviderError(c: ProviderErrorContext): string {
       `Couldn't reach ${c.label}${where}. Check that it is running and that the address in Settings is right. ` +
       `If Chronicler runs in Docker, "localhost" means the container itself — use http://host.docker.internal:11434 ` +
       `for Ollama on the same machine (on Linux, also start Ollama with OLLAMA_HOST=0.0.0.0).`;
-  } else if (c.status === 404 && /not found|does not exist|no such model|unknown model/i.test(d)) {
-    hint =
-      `${c.label} doesn't have ${model}. For Ollama, run "ollama pull ${c.model ?? "<model>"}" in a terminal, ` +
-      `or choose a model you already have in Settings.`;
+  } else if (c.status === 404 && /not found|does not exist|no such model|unknown model|^model\b/i.test(d)) {
+    hint = /ollama/i.test(c.label)
+      ? `${c.label} doesn't have ${model}. Run "ollama pull ${c.model ?? "<model>"}" in a terminal, or choose a model you already have in Settings.`
+      : `${c.label} doesn't recognise the model name ${model} — it may be misspelled, retired, or not available to this account. ` +
+        `In Settings → Providers press "load models from this server" to see the names it accepts.`;
   } else if (c.status === 401 || c.status === 403) {
     hint = `${c.label} rejected the credentials. Check the API key in Settings.`;
   } else if (c.status === 429) {

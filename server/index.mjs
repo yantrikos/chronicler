@@ -120,7 +120,7 @@ async function proxyMcp(req, res) {
 
   res.writeHead(
     upstream.status,
-    Object.fromEntries(upstream.headers.entries())
+    forwardableHeaders(upstream.headers)
   );
   if (upstream.body) {
     const reader = upstream.body.getReader();
@@ -136,6 +136,18 @@ async function proxyMcp(req, res) {
   } else {
     res.end();
   }
+}
+
+/** Response headers that are safe to pass on from an upstream. Node's fetch has ALREADY decompressed the body, so
+ *  forwarding `content-encoding: gzip` (or the compressed `content-length`) makes the browser try to decompress plain
+ *  text and fail — it reports that as a bare "Failed to fetch". That broke any reply a real API compresses (a model
+ *  list, a non-streaming chat call) while small error bodies and uncompressed streams still worked. The body is
+ *  re-framed by Node's own HTTP layer, so the framing headers go too. */
+const DROP_RESPONSE_HEADERS = new Set(["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive", "upgrade"]);
+function forwardableHeaders(headers) {
+  const out = {};
+  for (const [k, v] of headers.entries()) if (!DROP_RESPONSE_HEADERS.has(k.toLowerCase())) out[k] = v;
+  return out;
 }
 
 // Two limits, because a slow machine is slow in two different ways:
@@ -225,7 +237,7 @@ async function proxyLlm(req, res) {
 
   res.writeHead(
     upstream.status,
-    Object.fromEntries(upstream.headers.entries())
+    forwardableHeaders(upstream.headers)
   );
   if (upstream.body) {
     const reader = upstream.body.getReader();

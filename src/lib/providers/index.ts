@@ -127,6 +127,51 @@ export function anthropicContent(m: ChatMessage): string | unknown[] {
   ];
 }
 
+type AnthropicRole = "user" | "assistant";
+interface AnthropicMessage {
+  role: AnthropicRole;
+  content: string | Array<Record<string, unknown>>;
+}
+
+const asBlocks = (c: AnthropicMessage["content"]): Array<Record<string, unknown>> => (typeof c === "string" ? [{ type: "text", text: c }] : c);
+
+/** Shape a message list so the Messages API accepts it. Its rules are stricter than OpenAI-style APIs:
+ *  the first message must be the user's, only "user" and "assistant" exist in `messages` (the system prompt
+ *  is a separate field), text may not be empty, and newer models do not accept a conversation that ends on
+ *  the assistant. A chat that opens with the character's greeting, or carries a steering note as a
+ *  system-role message, used to be rejected outright. Nothing is dropped except empty turns: a short
+ *  neutral opener is added in front of a leading greeting and a nudge after a trailing assistant turn. */
+export function anthropicMessages(messages: ChatMessage[]): AnthropicMessage[] {
+  const out: AnthropicMessage[] = [];
+  for (const m of messages) {
+    const role: AnthropicRole = m.role === "assistant" ? "assistant" : "user"; // system / tool notes become user text
+    const content = anthropicContent(m) as AnthropicMessage["content"];
+    const empty = typeof content === "string" ? content.trim() === "" : content.every((b) => b.type === "text" && String(b.text ?? "").trim() === "");
+    if (empty) continue;
+    const prev = out[out.length - 1];
+    if (prev && prev.role === role) {
+      // The API merges consecutive same-role turns anyway; doing it here keeps the request predictable.
+      prev.content =
+        typeof prev.content === "string" && typeof content === "string" ? `${prev.content}\n\n${content}` : [...asBlocks(prev.content), ...asBlocks(content)];
+    } else out.push({ role, content });
+  }
+  if (out.length === 0 || out[0].role === "assistant") out.unshift({ role: "user", content: "(The scene begins.)" });
+  if (out[out.length - 1].role === "assistant") out.push({ role: "user", content: "(Continue.)" });
+  return out;
+}
+
+/** Claude takes a temperature in 0..1, and newer models reject temperature together with top_p. So send ONE of
+ *  them: the temperature (clamped), unless only a top_p was chosen — then that alone. top_k may accompany either. */
+export function anthropicSampling(s: { temperature?: number; top_p?: number; top_k?: number }, reqTemperature?: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  const t = s.temperature ?? reqTemperature;
+  if (t !== undefined) out.temperature = Math.min(1, Math.max(0, t));
+  else if (s.top_p !== undefined) out.top_p = s.top_p;
+  else out.temperature = 0.9;
+  if (s.top_k !== undefined) out.top_k = s.top_k;
+  return out;
+}
+
 export function geminiParts(m: ChatMessage): unknown[] {
   return [
     ...(m.images ?? []).map((b64) => ({ inline_data: { mime_type: IMAGE_MIME, data: b64 } })),
@@ -493,23 +538,40 @@ export class OllamaProvider implements LlmProvider {
 
 export class AnthropicProvider implements LlmProvider {
   name = "anthropic";
+  private apiUrl: string;
   constructor(
     private apiKey: string,
-    private apiUrl = "https://api.anthropic.com"
-  ) {}
+    apiUrl = "https://api.anthropic.com"
+  ) {
+    this.apiUrl = apiUrl.trim().replace(/\/+$/, "") || "https://api.anthropic.com";
+  }
+
+  /** Set once a model has refused sampling parameters; later calls then leave them out. */
+  private noSampling = false;
 
   private buildBody(req: ChatRequest, streaming: boolean) {
-    const s = req.sampling ?? {};
     return {
       model: req.model,
       system: req.system,
-      messages: req.messages.map((m) => ({ role: m.role, content: anthropicContent(m) })),
+      messages: anthropicMessages(req.messages),
       max_tokens: req.max_tokens ?? limit("reply.default_tokens"),
-      temperature: s.temperature ?? req.temperature ?? 0.9,
-      top_p: s.top_p,
-      top_k: s.top_k,
+      ...(this.noSampling ? {} : anthropicSampling(req.sampling ?? {}, req.temperature)),
       ...(streaming ? { stream: true } : {}),
     };
+  }
+
+  /** POST to the Messages API. Some Claude models refuse sampling parameters (temperature / top_p / top_k) with a
+   *  400 naming them; rather than guess which models, retry once without them and remember it. */
+  private async send(req: ChatRequest, streaming: boolean): Promise<Response> {
+    const go = () => proxyFetch({ signal: req.signal, target_url: `${this.apiUrl}/v1/messages`, headers: this.buildHeaders(), body: this.buildBody(req, streaming) });
+    const res = await go();
+    if (res.status !== 400 || this.noSampling) return res;
+    const text = await res.text();
+    if (/temperature|top_p|top_k/i.test(text)) {
+      this.noSampling = true;
+      return go();
+    }
+    return new Response(text, { status: 400 });
   }
 
   private buildHeaders(): Record<string, string> {
@@ -521,12 +583,7 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: `${this.apiUrl}/v1/messages`,
-      headers: this.buildHeaders(),
-      body: this.buildBody(req, false),
-    });
+    const res = await this.send(req, false);
     if (!res.ok) {
       throw await providerHttpError("Anthropic", res, { model: req.model });
     }
@@ -547,25 +604,24 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: `${this.apiUrl}/v1/messages`,
-      headers: this.buildHeaders(),
-      body: this.buildBody(req, true),
-    });
+    const res = await this.send(req, true);
     if (!res.ok || !res.body) {
       throw await providerHttpError("Anthropic", res, { model: req.model });
     }
     const st = newStreamState();
     st.completed = true; // no completion marker tracked for this stream; an empty reply is reported as empty
+    let apiError = "";
     yield* parseSseDeltas(res.body, (obj) => {
-      const o = obj as { type?: string; delta?: { text?: string } };
+      const o = obj as { type?: string; delta?: { text?: string }; error?: { type?: string; message?: string } };
+      // Anthropic reports problems that happen AFTER the 200 (overloaded, rate limited…) as an `error` event.
+      if (o?.type === "error") apiError = o.error?.message || o.error?.type || "unknown error";
       if (o?.type === "content_block_delta" && o?.delta?.text) {
         st.content += o.delta.text.length;
         return o.delta.text;
       }
       return undefined;
     });
+    if (st.content === 0 && apiError) throw new Error(`Anthropic stopped the reply: ${apiError}. This is usually temporary — try again in a moment.`);
     assertReply("Anthropic", st, req.max_tokens ?? limit("reply.default_tokens"));
   }
 }
