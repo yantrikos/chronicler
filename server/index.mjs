@@ -18,6 +18,7 @@
 // browser) and side-steps CORS on any provider we want to reach.
 
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,6 +139,34 @@ async function proxyMcp(req, res) {
   }
 }
 
+/** This server's version, so a browser tab left open across an update can tell it is out of date.
+ *  (CHRONICLER_VERSION_OVERRIDE exists only so tests can simulate an update.) */
+const APP_VERSION = (() => {
+  if (process.env.CHRONICLER_VERSION_OVERRIDE) return process.env.CHRONICLER_VERSION_OVERRIDE;
+  try {
+    return JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
+
+/** A URL that is safe to write to a log: secrets in the query string are masked. Some APIs (Gemini) carry the API
+ *  key in the URL, and every proxied call is logged. */
+const SECRET_PARAMS = /^(key|api[_-]?key|apikey|token|access[_-]?token|auth|authorization|secret|password|sig|signature)$/i;
+function redactUrl(raw) {
+  try {
+    const u = new URL(raw);
+    for (const k of [...u.searchParams.keys()]) if (SECRET_PARAMS.test(k)) u.searchParams.set(k, "***");
+    if (u.username || u.password) {
+      u.username = "***";
+      u.password = "";
+    }
+    return u.toString();
+  } catch {
+    return "(unparseable url)";
+  }
+}
+
 /** Response headers that are safe to pass on from an upstream. Node's fetch has ALREADY decompressed the body, so
  *  forwarding `content-encoding: gzip` (or the compressed `content-length`) makes the browser try to decompress plain
  *  text and fail — it reports that as a bare "Failed to fetch". That broke any reply a real API compresses (a model
@@ -187,7 +216,10 @@ async function proxyLlm(req, res) {
   }
 
   const started = Date.now();
-  console.log(`[llm] → ${method} ${target_url}`);
+  const logUrl = redactUrl(target_url);
+  // Error messages from fetch can quote the full request URL (key and all), so they are scrubbed before logging.
+  const scrub = (text) => String(text).split(target_url).join(logUrl).replace(/\/\/[^/@\s]+:[^/@\s]*@/g, "//***@");
+  console.log(`[llm] → ${method} ${logUrl}`);
 
   const controller = new AbortController();
   let timer;
@@ -221,18 +253,18 @@ async function proxyLlm(req, res) {
   } catch (err) {
     clearTimeout(timer);
     if (clientGone) {
-      console.log(`[llm] ✗ ${target_url} (client disconnected; request cancelled)`);
+      console.log(`[llm] ✗ ${logUrl} (client disconnected; request cancelled)`);
       return;
     }
     const reason = timedOut ?? (err.name === "AbortError" ? "aborted" : err.message);
-    console.log(`[llm] ✗ ${target_url} (${reason})`);
+    console.log(`[llm] ✗ ${logUrl} (${scrub(reason)})`);
     res.writeHead(502, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: `llm upstream unreachable: ${reason}` }));
     return;
   }
 
   console.log(
-    `[llm] ← ${upstream.status} ${target_url} (headers in ${Date.now() - started}ms)`
+    `[llm] ← ${upstream.status} ${logUrl} (headers in ${Date.now() - started}ms)`
   );
 
   res.writeHead(
@@ -252,13 +284,13 @@ async function proxyLlm(req, res) {
     } catch (err) {
       clearTimeout(timer);
       if (clientGone) {
-        console.log(`[llm] ✗ ${target_url} (client disconnected; upstream cancelled after ${Date.now() - started}ms)`);
+        console.log(`[llm] ✗ ${logUrl} (client disconnected; upstream cancelled after ${Date.now() - started}ms)`);
         return;
       }
       // Headers are already sent, so a status can't report this. End the connection abruptly (NOT a
       // clean end): the browser then sees the stream fail instead of mistaking a cut-off reply for a
       // finished one.
-      console.log(`[llm] ✗ stream error: ${timedOut ?? err.message}`);
+      console.log(`[llm] ✗ stream error: ${scrub(timedOut ?? err.message)}`);
       res.destroy(new Error(timedOut ?? err.message));
       return;
     }
@@ -266,7 +298,7 @@ async function proxyLlm(req, res) {
   clearTimeout(timer);
   res.end();
   console.log(
-    `[llm] ● done ${target_url} (total ${Date.now() - started}ms)`
+    `[llm] ● done ${logUrl} (total ${Date.now() - started}ms)`
   );
 }
 
@@ -319,6 +351,7 @@ const server = createServer(async (req, res) => {
       res.end(
         JSON.stringify({
           ok: true,
+          version: APP_VERSION,
           yantrikdb_url: YANTRIKDB_URL,
           has_yantrikdb_token: Boolean(YANTRIKDB_TOKEN),
         })

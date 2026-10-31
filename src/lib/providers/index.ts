@@ -11,6 +11,7 @@
 
 import { limit, limitOverride } from "../limits";
 import { providerHttpError } from "./errors";
+import { compatKey, describeCompat, getCompat, sendAdaptive, type Compat } from "./compat";
 import { emptyReplyMessage, guessThinkingStyle, ollamaThinkOff, openAiThinkingFields, type ThinkingStyle } from "./thinking";
 
 export interface ChatMessage {
@@ -92,6 +93,8 @@ export interface LlmProvider {
   name: string;
   chat(req: ChatRequest): Promise<ChatResponse>;
   stream?(req: ChatRequest): AsyncIterable<string>;
+  /** What has been learned about this model's limits, in words (e.g. "leaves out temperature"). */
+  adaptations?(model: string): string[];
 }
 
 export async function collectStream(
@@ -125,6 +128,45 @@ export function anthropicContent(m: ChatMessage): string | unknown[] {
     ...m.images.map((b64) => ({ type: "image", source: { type: "base64", media_type: IMAGE_MIME, data: b64 } })),
     { type: "text", text: m.content },
   ];
+}
+
+/** `obj` without the named keys. */
+function omitKeys<T extends Record<string, unknown>>(obj: T, keys: readonly string[]): Partial<T> {
+  const out: Partial<T> = { ...obj };
+  for (const k of keys) delete out[k];
+  return out;
+}
+
+/** Strictly alternating conversation for servers that insist on it (Mistral, some gateways): non-leading system and
+ *  tool notes become user text, empty turns go, consecutive same-role turns merge, it starts with the user and ends
+ *  with the user. Used only after a server has refused the plain ordering. */
+export function strictConversation(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    const role: "user" | "assistant" = m.role === "assistant" ? "assistant" : "user";
+    if (m.content.trim() === "" && !m.images?.length) continue;
+    const prev = out[out.length - 1];
+    if (prev && prev.role === role && !prev.images?.length && !m.images?.length) prev.content = `${prev.content}\n\n${m.content}`;
+    else out.push({ role, content: m.content, ...(m.images?.length ? { images: m.images } : {}) });
+  }
+  if (out.length === 0 || out[0].role === "assistant") out.unshift({ role: "user", content: "(The scene begins.)" });
+  if (out[out.length - 1].role === "assistant") out.push({ role: "user", content: "(Continue.)" });
+  return out;
+}
+
+/** Gemini: contents must start with a user turn; consecutive same-role turns are merged; empty turns dropped. */
+export function geminiContents(messages: ChatMessage[]): Array<{ role: "user" | "model"; parts: unknown[] }> {
+  const out: Array<{ role: "user" | "model"; parts: unknown[] }> = [];
+  for (const m of messages) {
+    const role = m.role === "assistant" ? "model" : "user"; // system / tool notes become user text
+    if (m.content.trim() === "" && !m.images?.length) continue;
+    const parts = geminiParts(m);
+    const prev = out[out.length - 1];
+    if (prev && prev.role === role) prev.parts.push(...parts);
+    else out.push({ role, parts });
+  }
+  if (out.length === 0 || out[0].role === "model") out.unshift({ role: "user", parts: [{ text: "(The scene begins.)" }] });
+  return out;
 }
 
 type AnthropicRole = "user" | "assistant";
@@ -287,13 +329,20 @@ export class OpenAICompatProvider implements LlmProvider {
     this.name = label;
   }
 
-  private buildBody(req: ChatRequest, streaming: boolean) {
+  private compatKeyFor = (model: string) => compatKey("openai", this.baseUrl, model);
+  adaptations(model: string): string[] {
+    return describeCompat(getCompat(this.compatKeyFor(model)));
+  }
+
+  private buildBody(req: ChatRequest, streaming: boolean, c: Compat) {
     const s = req.sampling ?? {};
     // Serialize messages per the OpenAI chat-completions spec. Tool
     // messages need {role: "tool", content, tool_call_id}; assistant
     // messages may include {tool_calls: [...]} when reflecting prior
     // calls back so the model has continuity across loop iterations.
-    const messages = req.messages.map((m) => {
+    // After a server has refused the plain ordering (Mistral and some gateways), send a strictly alternating one.
+    const source = c.strictRoles ? strictConversation(req.messages) : req.messages;
+    const messages = source.map((m) => {
       const base: Record<string, unknown> = { role: m.role, content: openAIContent(m) };
       if (m.tool_calls && m.tool_calls.length > 0) base.tool_calls = m.tool_calls;
       if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
@@ -305,9 +354,11 @@ export class OpenAICompatProvider implements LlmProvider {
         { role: "system" as const, content: req.system },
         ...messages,
       ],
-      temperature: s.temperature ?? req.temperature ?? 0.9,
-      top_p: s.top_p,
-      max_tokens: req.max_tokens ?? limit("reply.default_tokens"),
+      // Parameters a model has refused (OpenAI's reasoning models take no temperature / top_p) are left out.
+      ...(c.drop.includes("temperature") ? {} : { temperature: s.temperature ?? req.temperature ?? 0.9 }),
+      ...(c.drop.includes("top_p") || s.top_p === undefined ? {} : { top_p: s.top_p }),
+      // …and those same models want max_completion_tokens in place of max_tokens.
+      [c.tokenParam ?? "max_tokens"]: req.max_tokens ?? limit("reply.default_tokens"),
       ...(streaming ? { stream: true } : {}),
       // OpenAI-style tool calling. Most providers (OpenAI, Ollama,
       // OpenRouter, nano-gpt, Anthropic-via-compat) honor this; ones
@@ -320,12 +371,26 @@ export class OpenAICompatProvider implements LlmProvider {
       // honours ONLY reasoning_effort:"none" and silently ignores think:false. With no explicit
       // style we keep sending the legacy think:false and add what the address suggests.
       ...(this.disableThinking
-        ? {
-            ...(this.thinkingStyle === undefined ? { think: false } : {}),
-            ...openAiThinkingFields(this.thinkingStyle ?? guessThinkingStyle(this.baseUrl)),
-          }
+        ? omitKeys(
+            {
+              ...(this.thinkingStyle === undefined ? { think: false } : {}),
+              ...openAiThinkingFields(this.thinkingStyle ?? guessThinkingStyle(this.baseUrl)),
+            },
+            c.drop
+          )
         : {}),
     };
+  }
+
+  /** POST to /chat/completions, learning (and remembering) what this model refuses. */
+  private async send(req: ChatRequest, streaming: boolean): Promise<Response> {
+    const { res } = await sendAdaptive({
+      key: this.compatKeyFor(req.model),
+      kind: "openai",
+      build: (c) => this.buildBody(req, streaming, c),
+      post: (body) => proxyFetch({ signal: req.signal, target_url: `${this.baseUrl}/chat/completions`, headers: this.buildHeaders(), body }),
+    });
+    return res;
   }
 
   private buildHeaders(): Record<string, string> {
@@ -336,12 +401,7 @@ export class OpenAICompatProvider implements LlmProvider {
   }
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: `${this.baseUrl}/chat/completions`,
-      headers: this.buildHeaders(),
-      body: this.buildBody(req, false),
-    });
+    const res = await this.send(req, false);
     if (!res.ok) {
       throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
@@ -389,12 +449,7 @@ export class OpenAICompatProvider implements LlmProvider {
   }
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: `${this.baseUrl}/chat/completions`,
-      headers: this.buildHeaders(),
-      body: this.buildBody(req, true),
-    });
+    const res = await this.send(req, true);
     if (!res.ok || !res.body) {
       throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
@@ -443,17 +498,17 @@ export class OllamaProvider implements LlmProvider {
     return this.baseUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "") + "/api/chat";
   }
 
-  private buildBody(req: ChatRequest, streaming: boolean) {
+  private compatKeyFor = (model: string) => compatKey("ollama", this.baseUrl, model);
+  adaptations(model: string): string[] {
+    return describeCompat(getCompat(this.compatKeyFor(model)));
+  }
+
+  private buildBody(req: ChatRequest, streaming: boolean, c: Compat) {
     const s = req.sampling ?? {};
-    return {
-      model: req.model,
-      messages: [
-        { role: "system" as const, content: req.system },
-        ...req.messages,
-      ],
-      stream: streaming,
-      ...(this.disableThinking ? { think: ollamaThinkOff(req.model) } : {}),
-      options: {
+    // Older Ollama builds reject `think`, and builds differ in which sampling options they take; whatever a
+    // server has refused is left out from then on.
+    const options = omitKeys(
+      {
         temperature: s.temperature ?? req.temperature ?? 0.9,
         top_p: s.top_p,
         top_k: s.top_k,
@@ -462,16 +517,32 @@ export class OllamaProvider implements LlmProvider {
         num_predict: req.max_tokens ?? limit("reply.default_tokens"),
         ...(this.contextWindow ? { num_ctx: this.contextWindow } : {}),
       },
+      [...c.drop, ...(c.drop.includes("repetition_penalty") ? ["repeat_penalty"] : [])]
+    );
+    return {
+      model: req.model,
+      messages: [
+        { role: "system" as const, content: req.system },
+        ...req.messages,
+      ],
+      stream: streaming,
+      ...(this.disableThinking && !c.drop.includes("think") ? { think: ollamaThinkOff(req.model) } : {}),
+      options,
     };
   }
 
-  async chat(req: ChatRequest): Promise<ChatResponse> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: this.apiUrl(),
-      headers: { "content-type": "application/json" },
-      body: this.buildBody(req, false),
+  private async send(req: ChatRequest, streaming: boolean): Promise<Response> {
+    const { res } = await sendAdaptive({
+      key: this.compatKeyFor(req.model),
+      kind: "ollama",
+      build: (c) => this.buildBody(req, streaming, c),
+      post: (body) => proxyFetch({ signal: req.signal, target_url: this.apiUrl(), headers: { "content-type": "application/json" }, body }),
     });
+    return res;
+  }
+
+  async chat(req: ChatRequest): Promise<ChatResponse> {
+    const res = await this.send(req, false);
     if (!res.ok) {
       throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
@@ -490,12 +561,7 @@ export class OllamaProvider implements LlmProvider {
   }
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: this.apiUrl(),
-      headers: { "content-type": "application/json" },
-      body: this.buildBody(req, true),
-    });
+    const res = await this.send(req, true);
     if (!res.ok || !res.body) {
       throw await providerHttpError(this.label, res, { baseUrl: this.baseUrl, model: req.model });
     }
@@ -546,32 +612,34 @@ export class AnthropicProvider implements LlmProvider {
     this.apiUrl = apiUrl.trim().replace(/\/+$/, "") || "https://api.anthropic.com";
   }
 
-  /** Set once a model has refused sampling parameters; later calls then leave them out. */
-  private noSampling = false;
+  private compatKeyFor = (model: string) => compatKey("anthropic", this.apiUrl, model);
+  adaptations(model: string): string[] {
+    return describeCompat(getCompat(this.compatKeyFor(model)));
+  }
 
-  private buildBody(req: ChatRequest, streaming: boolean) {
+  private buildBody(req: ChatRequest, streaming: boolean, c: Compat) {
+    // Claude takes one of temperature / top_p; a model that refuses either (or both) has it left out for good.
+    const sampling = anthropicSampling(req.sampling ?? {}, req.temperature);
+    for (const dropped of c.drop) delete sampling[dropped];
     return {
       model: req.model,
       system: req.system,
       messages: anthropicMessages(req.messages),
       max_tokens: req.max_tokens ?? limit("reply.default_tokens"),
-      ...(this.noSampling ? {} : anthropicSampling(req.sampling ?? {}, req.temperature)),
+      ...sampling,
       ...(streaming ? { stream: true } : {}),
     };
   }
 
-  /** POST to the Messages API. Some Claude models refuse sampling parameters (temperature / top_p / top_k) with a
-   *  400 naming them; rather than guess which models, retry once without them and remember it. */
+  /** POST to the Messages API, learning (and remembering) any parameter this model refuses. */
   private async send(req: ChatRequest, streaming: boolean): Promise<Response> {
-    const go = () => proxyFetch({ signal: req.signal, target_url: `${this.apiUrl}/v1/messages`, headers: this.buildHeaders(), body: this.buildBody(req, streaming) });
-    const res = await go();
-    if (res.status !== 400 || this.noSampling) return res;
-    const text = await res.text();
-    if (/temperature|top_p|top_k/i.test(text)) {
-      this.noSampling = true;
-      return go();
-    }
-    return new Response(text, { status: 400 });
+    const { res } = await sendAdaptive({
+      key: this.compatKeyFor(req.model),
+      kind: "anthropic",
+      build: (c) => this.buildBody(req, streaming, c),
+      post: (body) => proxyFetch({ signal: req.signal, target_url: `${this.apiUrl}/v1/messages`, headers: this.buildHeaders(), body }),
+    });
+    return res;
   }
 
   private buildHeaders(): Record<string, string> {
@@ -642,27 +710,36 @@ export class GeminiProvider implements LlmProvider {
     private baseUrl = "https://generativelanguage.googleapis.com/v1beta"
   ) {}
 
-  private buildBody(req: ChatRequest) {
+  private compatKeyFor = (model: string) => compatKey("gemini", this.baseUrl, model);
+  adaptations(model: string): string[] {
+    return describeCompat(getCompat(this.compatKeyFor(model)));
+  }
+
+  private buildBody(req: ChatRequest, c: Compat) {
     const s = req.sampling ?? {};
-    // Gemini wants user/model turns; map our assistant role to "model".
-    const contents = req.messages
-      .filter((m) => m.role !== "system")
-      .map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: geminiParts(m),
-      }));
     return {
-      contents,
+      // Gemini wants user/model turns starting with the user; see geminiContents.
+      contents: geminiContents(req.messages),
       systemInstruction: req.system
         ? { parts: [{ text: req.system }] }
         : undefined,
       generationConfig: {
-        temperature: s.temperature ?? req.temperature ?? 0.9,
-        topP: s.top_p,
-        topK: s.top_k,
+        ...(c.drop.includes("temperature") ? {} : { temperature: s.temperature ?? req.temperature ?? 0.9 }),
+        ...(c.drop.includes("top_p") || s.top_p === undefined ? {} : { topP: s.top_p }),
+        ...(c.drop.includes("top_k") || s.top_k === undefined ? {} : { topK: s.top_k }),
         maxOutputTokens: req.max_tokens ?? limit("reply.default_tokens"),
       },
     };
+  }
+
+  private async send(req: ChatRequest, streaming: boolean): Promise<Response> {
+    const { res } = await sendAdaptive({
+      key: this.compatKeyFor(req.model),
+      kind: "gemini",
+      build: (c) => this.buildBody(req, c),
+      post: (body) => proxyFetch({ signal: req.signal, target_url: this.endpoint(req.model, streaming), headers: { "content-type": "application/json" }, body }),
+    });
+    return res;
   }
 
   private endpoint(model: string, streaming: boolean): string {
@@ -676,12 +753,7 @@ export class GeminiProvider implements LlmProvider {
   }
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: this.endpoint(req.model, false),
-      headers: { "content-type": "application/json" },
-      body: this.buildBody(req),
-    });
+    const res = await this.send(req, false);
     if (!res.ok) {
       throw await providerHttpError("Gemini", res, { model: req.model });
     }
@@ -701,12 +773,7 @@ export class GeminiProvider implements LlmProvider {
   }
 
   async *stream(req: ChatRequest): AsyncIterable<string> {
-    const res = await proxyFetch({
-      signal: req.signal,
-      target_url: this.endpoint(req.model, true),
-      headers: { "content-type": "application/json" },
-      body: this.buildBody(req),
-    });
+    const res = await this.send(req, true);
     if (!res.ok || !res.body) {
       throw await providerHttpError("Gemini", res, { model: req.model });
     }

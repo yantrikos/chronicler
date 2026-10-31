@@ -2,6 +2,36 @@
 
 All notable changes to Chronicler are documented here. Versions follow [Semantic Versioning](https://semver.org/); pre-1.0 releases may include breaking changes between minor versions.
 
+## [0.6.7] — 2026-10-31 — Every provider adapts to the model it is talking to
+
+v0.6.6 fixed Claude after a real key showed that newer Claude models refuse `temperature` outright. That was one instance of a general problem — each API, and each *model*, has its own rules
+about what a request may contain, and they keep changing — so this release handles it generally instead of one provider at a time.
+
+### Added
+- **Chronicler now learns what each model accepts.** When a model refuses a parameter or a message ordering with a 400, Chronicler works out *which* one from the error text, retries without it,
+  and remembers it per model and server — so the next message, and the next session, are right the first time. It covers the cases the APIs document: Claude's newer models refusing `temperature`
+  / `top_p` / `top_k`; OpenAI's reasoning models wanting `max_completion_tokens` instead of `max_tokens` and refusing temperature and `top_p`; Mistral-style servers demanding strictly alternating
+  roles; Gemini's differently-spelled sampling fields and its user-turn-first rule; and older Ollama builds that do not know `think`. A bad key, a wrong model name or a rate limit are never mistaken
+  for "a parameter to drop".
+- **Settings → Providers → test connection.** One real, tiny call with the provider's current (even unsaved) settings: it shows whether the key and model work, how long it took, the exact reason if not,
+  and what Chronicler adapted for that model.
+- **A notice when your page is out of date.** A tab left open across an update keeps running the *old* code — which makes a fixed bug look unfixed. The page now compares its version with the server's
+  (shown in Settings, `/api/health` reports it) and offers a reload; it never reloads by itself, so a message you are typing is safe.
+
+### Fixed
+- **API keys no longer appear in the server log.** Gemini carries its key in the request URL and every proxied call is logged; secrets in query strings (`key`, `api_key`, `token`…) and passwords in URLs
+  are now masked, including inside error messages. If you ran Gemini through an earlier version, rotate that key and clear old container logs.
+- Gemini: a chat that opens with the character's greeting no longer has a model turn first, and consecutive turns are merged.
+
+### Tests
+- New tests run the real provider classes against strict fake APIs for each family (Claude variants, OpenAI reasoning models, Mistral-style roles, Gemini, old Ollama), including that the rules are remembered
+  in a new session; plus the version check and the log redaction.
+
+### Not verified
+- Checked against fakes that enforce the documented rules, and for Claude against a real key by hand. **Not run with real OpenAI, Mistral or Gemini keys** — use *test connection* to check yours.
+
+---
+
 ## [0.6.6] — 2026-10-31 — Claude (Anthropic) works
 
 Fixes "I'm using Claude and it fails constantly". Two separate bugs, either of which could do it.

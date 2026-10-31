@@ -96,7 +96,9 @@ import { CoreTraitPromoter } from "./lib/skills/core-trait-promoter";
 import { SelfModelGenerator } from "./lib/identity/self-model-generator";
 import { applyEnactments, ensureEnactments, traitKey } from "./lib/identity/trait-enactment";
 import { NoModelBar, NO_MODEL_MESSAGE } from "./components/Notices/NoModelBar";
+import { UpdateBar } from "./components/Notices/UpdateBar";
 import { LlmGate, gateBackground, gateChat, shouldGate } from "./lib/providers/gate";
+import { testProvider } from "./lib/providers/test-connection";
 import { loadEnactments, saveEnactments } from "./lib/identity/enactment-store";
 import {
   loadSelfModel,
@@ -3649,6 +3651,7 @@ function App() {
   if (view === "library") {
     return (
       <div className="h-screen text-sm flex flex-col">
+        <UpdateBar />
         {needsProvider(config) && <NoModelBar onOpenSettings={() => setSettingsOpen(true)} />}
         <div className="flex-1 min-h-0">
         <CharacterLibrary
@@ -3747,6 +3750,7 @@ function App() {
           })()}
         {settingsOpen && (
           <SettingsPanel
+            onTestProvider={(p) => testProvider(buildProvider(p), p.model)}
             config={config}
             onClose={() => setSettingsOpen(false)}
             onSave={(cfg) => {
@@ -4013,6 +4017,7 @@ function App() {
             )}
           </div>
         )}
+        <UpdateBar />
         {needsProvider(config) && <NoModelBar onOpenSettings={() => setSettingsOpen(true)} />}
         {errorMsg && (
           <div className="px-6 py-2 bg-red-900/60 border-b border-red-700 text-red-100 text-xs flex items-start justify-between gap-4">
@@ -4461,6 +4466,7 @@ function App() {
       )}
       {settingsOpen && (
         <SettingsPanel
+            onTestProvider={(p) => testProvider(buildProvider(p), p.model)}
           config={config}
           onClose={() => setSettingsOpen(false)}
           onSave={(cfg) => {

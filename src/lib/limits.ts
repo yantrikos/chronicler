@@ -66,6 +66,7 @@ export const LIMITS = [
   tokens("bg.audit_traits", "Background tasks", "Consistency audit: list traits", 300, "Extracts the declared traits an audit checks against."),
   tokens("bg.audit_judge", "Background tasks", "Consistency audit: judge", 300, "Flags replies that contradict a trait."),
   tokens("bg.vision_describe", "Background tasks", "Image description", 320, "The description a vision model writes for an attached image."),
+  tokens("bg.test_connection", "Background tasks", "Test connection reply", 64, "Settings → Providers → test connection: the most tokens the model may write in its one-word reply. A reasoning model that thinks first may need more.", 4096),
 
   // ── Timeouts (the model server connection) ──
   { key: "proxy.first_byte_s", group: "Timeouts", label: "Wait for the first word (seconds)", default: 600, min: 5, max: 7200, unit: "seconds",

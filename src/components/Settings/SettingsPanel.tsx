@@ -19,6 +19,7 @@ import { ThemePicker } from "./ThemePicker";
 import { VisualsSection } from "./VisualsSection";
 import { VisionSection } from "./VisionSection";
 import { StorageSection } from "./StorageSection";
+import type { TestResult } from "../../lib/providers/test-connection";
 
 interface Props {
   config: ChroniclerConfig;
@@ -30,6 +31,8 @@ interface Props {
   /** Required for the Danger Zone wipe-memories action. When omitted,
    *  the danger zone is hidden entirely. */
   yantrikClient?: YantrikClient;
+  /** One real call with a provider's current settings (Settings → Providers → test connection). */
+  onTestProvider?: (p: ProviderConfigEntry) => Promise<TestResult>;
 }
 
 export function SettingsPanel({
@@ -40,6 +43,7 @@ export function SettingsPanel({
   onImportBackup,
   mcpRegistry,
   yantrikClient,
+  onTestProvider,
 }: Props) {
   const [draft, setDraft] = useState<ChroniclerConfig>(config);
 
@@ -82,7 +86,7 @@ export function SettingsPanel({
     <div className="fixed inset-0 bg-black/35 backdrop-blur-[2px] flex items-center justify-center z-50">
       <div className="bg-neutral-900 border border-neutral-800 rounded-lg w-[640px] max-h-[85vh] overflow-y-auto shadow-2xl">
         <header className="px-5 py-3 border-b border-neutral-800 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Settings</h2>
+          <h2 className="text-base font-semibold">Settings <span className="ml-2 text-[10px] font-normal text-neutral-500" title="The version of this page">v{__APP_VERSION__}</span></h2>
           <button onClick={onClose} className="text-neutral-400 hover:text-neutral-100 text-sm">
             close
           </button>
@@ -409,7 +413,7 @@ export function SettingsPanel({
                         value={p.model}
                         onChange={(v) => updateProvider(p.id, { model: v })}
                       />
-                      <ProviderModelPicker provider={p} onPick={(m) => updateProvider(p.id, { model: m })} />
+                      <ProviderModelPicker provider={p} onPick={(m) => updateProvider(p.id, { model: m })} onTest={onTestProvider} />
                       <LabeledInput
                         label="api key"
                         value={p.api_key}
