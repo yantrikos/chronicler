@@ -154,7 +154,7 @@ Pulls the latest published images and restarts. Your memory DB persists in the n
 - **Frontend:** React 19 + TypeScript + Vite + Tailwind v4 + react-markdown
 - **Server:** tiny Node HTTP proxy — serves the built SPA, routes `/api/mcp/*` to YantrikDB, routes `POST /api/llm` to configured providers (keeps API keys host-side, no browser CORS)
 - **Memory:** [YantrikDB](https://github.com/yantrikos/yantrikdb) — local semantic memory with knowledge graph, conflict detection, consolidation, temporal triggers, personality inference, procedural memory
-- **LLM:** Ollama native (`/api/chat` with `think: false` support) + OpenAI-compatible + Anthropic native; streaming on all three
+- **LLM:** Ollama native (`/api/chat` with `think: false` support) + OpenAI-compatible + Anthropic native + Gemini native; streaming on all four. Each provider adapts its request to what the specific model actually accepts — sampling parameters, message ordering, token-limit field names — and remembers the adaptation per server + model; **Settings → Providers → test connection** checks any of them with one real call.
 
 See [docs/ADR-001-stack.md](docs/ADR-001-stack.md) for why web+Docker over native (yes, we pivoted from Tauri).
 
@@ -194,7 +194,8 @@ chronicler/
       orchestrator/             per-turn pipeline, compose, write, extract, scene,
                                 auto-promote, lorebook scanner, anti-confabulation
       cards/                    v2/v3 parser + decomposition
-      providers/                OpenAI-compat / Anthropic / Ollama / Mock
+      providers/                OpenAI-compat / Anthropic / Ollama / Gemini / Mock, per-model request
+                                compatibility (compat.ts), test connection
       session/                  lifecycle, store, markdown export
       recap/                    previously-on generator
       instrumentation/          promotion + session logs (redacted by default)
@@ -219,6 +220,7 @@ chronicler/
 
 - All traffic binds to `127.0.0.1` by default. Remote access requires you to remove that binding yourself and add an auth layer in front (Tailscale / Caddy).
 - LLM API keys live in your browser's localStorage and in the proxy request body; they never leave your machine except to reach the provider you configured.
+- The proxy's own logs mask API keys and other secrets that appear in a request URL (query strings, userinfo), including inside fetch error messages. Fixed in v0.6.7 — before that, a provider that carries its key in the URL (Gemini) could have it written to the container log unmasked; if you ran Gemini through an earlier version, rotate that key and clear old container logs.
 - Promotion and session logs redact memory text by default. Opt into verbose local-only logging with `CHRONICLER_VERBOSE_LOGS=1`.
 - **Session content is never transmitted to anywhere except your configured LLM provider.** The YantrikDB service runs alongside Chronicler in the same Docker network; your memories never leave your machine.
 - Group-chat privacy is enforced mechanically via per-memory `visible_to` ACLs and pre-ranking retrieval filters — verified by `tests/secret-stays-private.test.ts`.
